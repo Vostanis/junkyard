@@ -1,10 +1,10 @@
 [workspace]
 members = [ "crates/*" ]
+resolver = "2"
 
-[package]
+[workspace.package]
 name = "junkyard"
 version = "0.1.0"
-edition = "2021"
 
 [workspace.dependencies]
 anyhow = { version = "1" }
@@ -14,5 +14,6 @@ serde = { version = "1" }
 serde_json = { version = "1" }
 sqlite = { version = "0.36" }
 thiserror = { version = "2" }
+tracing = { version = "0.1.41" }
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = { version = "0.7" }
