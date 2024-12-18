@@ -1,5 +1,5 @@
 [package]
-name = "junk-scraper"
+name = "junk-spider"
 version = "0.1.0"
 edition = "2021"
 

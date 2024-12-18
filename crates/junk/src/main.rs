@@ -1,10 +1,17 @@
 mod cli;
 
+// remote imports
 use clap::Parser;
 use cli::{Cli, TraceLevel};
+use dotenv::var;
+use tokio_postgres::{self as pg, NoTls};
 use tracing::{debug, error, info, subscriber, trace, Level};
 use tracing_subscriber::FmtSubscriber;
 
+// local modules
+use junk_spider as spider;
+
+// preproccess the trace level
 fn preprocess(trace_level: Level) {
     dotenv::dotenv().ok();
     let my_subscriber = FmtSubscriber::builder()
@@ -33,15 +40,29 @@ async fn main() -> anyhow::Result<()> {
         // scrape endpoints
         cli::Commands::Spider => {
             // 1. build pg connection
+            trace!("Establishing PostgreSQL connection");
+            let (mut pg_client, pg_conn) = pg::connect(
+                &var("POSTGRES_URL").expect("environment variable POSTGRES_URL"),
+                NoTls,
+            )
+            .await?;
+            tokio::spawn(async move {
+                if let Err(e) = pg_conn.await {
+                    error!("connection error: {}", e);
+                }
+            });
+            debug!("PostgreSQL connection established");
+
             // 2. match pre-built endpoints to scrape
+            spider::crypto::binance::scrape(&mut pg_client).await?;
+
+            // match subcommand somehow
         }
 
         // test env
         cli::Commands::Test => {
-            println!("test command");
-        } // cli::Commands::Yard => {
-          //     tui
-          // }
+            println!("Hello, World!");
+        }
     }
 
     Ok(())
