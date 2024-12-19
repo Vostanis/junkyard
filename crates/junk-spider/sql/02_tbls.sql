@@ -31,8 +31,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_symbol ON crypto.symbols(symbol);
 -- price data, including number of trades
 CREATE TABLE IF NOT EXISTS crypto.prices (
 	symbol_pk INT,
-	time TIMESTAMP,
-	interval_pk INT,
+	time TIMESTAMP WITH TIME ZONE NOT NULL,
+	interval_pk SMALLINT,
 	opening FLOAT,
 	high FLOAT,
 	low FLOAT,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS crypto.prices (
 
 -- which broker the data came from, e.g. binance, kucoin, mexc
 CREATE TABLE IF NOT EXISTS crypto.sources (
-	pk SERIAL PRIMARY KEY,
+	pk SMALLSERIAL PRIMARY KEY,
 	source VARCHAR NOT NULL
 );
 

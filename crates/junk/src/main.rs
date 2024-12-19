@@ -5,7 +5,7 @@ use clap::Parser;
 use cli::{Cli, TraceLevel};
 use dotenv::var;
 use tokio_postgres::{self as pg, NoTls};
-use tracing::{debug, error, info, subscriber, trace, Level};
+use tracing::{debug, error, subscriber, trace, Level};
 use tracing_subscriber::FmtSubscriber;
 
 // preproccess the trace level

@@ -7,7 +7,7 @@ use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 // RATE_LIMIT = 1200 /60s
 //
@@ -56,6 +56,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
 
     // 3. fetch & insert prices (using the previous 2 datatables)
     // 3a. fetch symbols
+    info!("fetching symbols ...");
     let rows = pg_client
         .query("SELECT pk, symbol FROM crypto.symbols", &[])
         .await
@@ -72,6 +73,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     let symbol_pks = Arc::new(symbol_pks);
 
     // 3b. fetch sources
+    info!("fetching sources ...");
     let rows = pg_client
         .query("SELECT pk, source FROM crypto.sources", &[])
         .await
@@ -79,14 +81,14 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             error!("failed to fetch crypto.sources");
             err
         })?;
-    let mut source_pks: HashMap<String, i32> = HashMap::new();
+    let mut source_pks: HashMap<String, i16> = HashMap::new();
     for row in rows {
-        let pk: i32 = row.get("pk");
+        let pk: i16 = row.get("pk");
         let source: String = row.get("source");
         source_pks.insert(source, pk);
     }
     let source_pk = match source_pks.get("Binance") {
-        Some(pk) => pk,
+        Some(pk) => *pk,
         None => {
             error!("failed to find Binance source pk");
             return Err(anyhow::anyhow!("failed to find Binance source pk"));
@@ -97,6 +99,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     let pg_client = Arc::new(Mutex::new(pg_client));
 
     // 3c. fetch prices for tickers
+    info!("fetching prices ...");
     let stream = stream::iter(&tickers.0);
     stream
         .for_each_concurrent(3, |ticker| {
@@ -127,8 +130,8 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     };
 
                     let mut pg_client = pg_client.lock().await;
-                    match klines.insert(&mut pg_client, symbol, *symbol_pk, **source_pk).await {
-                        Ok(_) => debug!("inserted prices for {symbol}"),
+                    match klines.insert(&mut pg_client, symbol, *symbol_pk, *source_pk).await {
+                        Ok(_) => trace!("inserted prices for {symbol}"),
                         Err(err) => error!("failed to insert prices for {symbol}, error({err})"),
                     };
                 } else {
@@ -190,7 +193,6 @@ struct Ticker {
 
 impl Tickers {
     async fn scrape(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
-        debug!("inserting Binance symbols into database");
         let time = std::time::Instant::now();
 
         // preprocess pg query as transaction
@@ -234,7 +236,7 @@ impl Tickers {
             })?;
 
         debug!(
-            "Binance priceset inserted. Elapsed time: {} ms",
+            "ticker data collected from Binance, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 
@@ -332,11 +334,10 @@ impl Klines {
         pg_client: &mut PgClient,
         symbol: &String,
         symbol_pk: i32,
-        source_pk: i32,
+        source_pk: i16,
     ) -> anyhow::Result<()> {
         // start the clock
         let time = std::time::Instant::now();
-        debug!("inserting price data for {} from Binance", symbol);
 
         // preprocess pg query as transaction
         let query = pg_client.prepare(sql::INSERT_PRICE).await?;
@@ -349,6 +350,7 @@ impl Klines {
                 let query = query.clone();
                 let transaction = transaction.clone();
                 let symbol = &symbol;
+                let interval_pk: i16 = 3;
                 async move {
                     let result = transaction
                         .execute(
@@ -357,7 +359,7 @@ impl Klines {
                                 &symbol_pk,
                                 &chrono::DateTime::from_timestamp_millis(cell.timestamp)
                                     .expect("i64 -> DateTime"),
-                                &3,
+                                &interval_pk,
                                 &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
                                 &cell.high.parse::<f64>().expect("String -> f64 High"),
                                 &cell.low.parse::<f64>().expect("String -> f64 Low"),
@@ -390,7 +392,7 @@ impl Klines {
             })?;
 
         debug!(
-            "Binance priceset inserted. Elapsed time: {} ms",
+            "{symbol} price data collected from Binance, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 
