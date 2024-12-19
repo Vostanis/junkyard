@@ -5,6 +5,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::ClientBuilder;
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, trace};
 
@@ -20,8 +21,10 @@ use tracing::{debug, error, trace};
 
 pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     // build the client
-    let client = build_client();
-    let tickers: Tickers = client
+    let http_client = build_client();
+
+    // fetch the tickers
+    let tickers: Tickers = http_client
         .get("https://api.binance.com/api/v1/ticker/allBookTickers")
         .send()
         .await
@@ -36,7 +39,69 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             err
         })?;
 
-    println!("{:?}", tickers);
+    // 1. insert binance source
+    pg_client
+        .query(
+            "INSERT INTO crypto.sources (source) VALUES ('Binance') ON CONFLICT DO NOTHING",
+            &[],
+        )
+        .await
+        .map_err(|err| {
+            error!("failed to insert Binance as a source");
+            err
+        })?;
+
+    // 2. insert tickers
+    tickers.scrape(pg_client).await?;
+
+    // 3. fetch & insert prices (using the previous 2 datatables)
+    // 3a. fetch symbols
+    let rows = pg_client
+        .query("SELECT pk, symbol FROM crypto.symbols", &[])
+        .await
+        .map_err(|err| {
+            error!("failed to fetch Binance symbols");
+            err
+        })?;
+    let mut pks: HashMap<String, i32> = HashMap::new();
+    for row in rows {
+        let pk: i32 = row.get("pk");
+        let symbol: String = row.get("symbol");
+        pks.insert(symbol, pk);
+    }
+    let pks = Arc::new(pks);
+
+    let count = Arc::new(std::sync::Mutex::new(0));
+
+    let stream = stream::iter(&tickers.0);
+    stream
+        .for_each_concurrent(12, |ticker| {
+            let http_client = &http_client;
+            let pks = &pks;
+            let symbol = &ticker.symbol;
+            let count = count.clone();
+            async move {
+                if let Some(symbol_pk) = pks.get(symbol) {
+                    trace!("fetching prices for {}", symbol);
+                    let url = format!("https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000");
+                    let klines: Klines = http_client
+                        .get(url)
+                        .send()
+                        .await
+                        .unwrap()
+                        .json()
+                        .await
+                        .unwrap();
+                    let mut count = count.lock().unwrap();
+                    *count += 1;
+
+                    tracing::info!("count: {}", *count);
+                } else {
+                    error!("failed to find symbol pk for {}", &ticker.symbol);
+                }
+            }
+        })
+        .await;
 
     Ok(())
 }
@@ -89,17 +154,16 @@ struct Ticker {
 }
 
 impl Tickers {
-    async fn scrape(self, pg_client: &mut PgClient) -> anyhow::Result<()> {
-        // start the clocwhat is rayon in this context?k
-        let time = std::time::Instant::now();
+    async fn scrape(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
         debug!("inserting Binance symbols into database");
+        let time = std::time::Instant::now();
 
         // preprocess pg query as transaction
         let query = pg_client.prepare(sql::INSERT_SYMBOL).await?;
         let transaction = Arc::new(pg_client.transaction().await?);
 
         // iterate over the data stream and execute pg rows
-        let stream = stream::iter(self.0);
+        let stream = stream::iter(&self.0);
         stream
             .for_each_concurrent(12, |ticker| {
                 let query = query.clone();

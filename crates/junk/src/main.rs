@@ -8,9 +8,6 @@ use tokio_postgres::{self as pg, NoTls};
 use tracing::{debug, error, info, subscriber, trace, Level};
 use tracing_subscriber::FmtSubscriber;
 
-// local modules
-use junk_spider as spider;
-
 // preproccess the trace level
 fn preprocess(trace_level: Level) {
     dotenv::dotenv().ok();
@@ -36,22 +33,30 @@ async fn main() -> anyhow::Result<()> {
     trace!("command line input recorded: {cli:?}");
 
     // read cli inputs
+    use cli::Commands::*;
     match cli.command {
         // scrape endpoints
-        cli::Commands::Spider => {
+        Spider => {
+            use junk_spider as spider;
+
             // 1. build pg connection
-            trace!("Establishing PostgreSQL connection");
+            trace!("connecting to findump ...");
             let (mut pg_client, pg_conn) = pg::connect(
-                &var("POSTGRES_URL").expect("environment variable POSTGRES_URL"),
+                &var("FINDUMP_URL").expect("environment variable FINDUMP_URL"),
                 NoTls,
             )
-            .await?;
+            .await
+            .map_err(|err| {
+                error!("findump connection error: {}", err);
+                err
+            })?;
+
             tokio::spawn(async move {
-                if let Err(e) = pg_conn.await {
-                    error!("connection error: {}", e);
+                if let Err(err) = pg_conn.await {
+                    error!("findump connection error: {}", err);
                 }
             });
-            debug!("PostgreSQL connection established");
+            debug!("findump connection established");
 
             // 2. match pre-built endpoints to scrape
             spider::crypto::binance::scrape(&mut pg_client).await?;
@@ -60,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         // test env
-        cli::Commands::Test => {
+        Test => {
             println!("Hello, World!");
         }
     }

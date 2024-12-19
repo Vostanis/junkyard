@@ -1,3 +1,7 @@
+///////////////////////////////////////////////////////
+// prices
+///////////////////////////////////////////////////////
+
 // insert price cell
 pub(crate) const INSERT_PRICE: &'static str = "
     INSERT INTO crypto.prices (
@@ -18,6 +22,10 @@ pub(crate) const INSERT_PRICE: &'static str = "
     DO NOTHING
 ";
 
+///////////////////////////////////////////////////////
+// sources
+///////////////////////////////////////////////////////
+
 // insert source
 pub(crate) const INSERT_SOURCE: &'static str = "
     INSERT INTO crypto.sources (pk, source)
@@ -32,9 +40,13 @@ pub(crate) const SELECT_SOURCE_PK: &'static str = "
     WHERE sources = $1
 ";
 
+///////////////////////////////////////////////////////
+// symbols
+///////////////////////////////////////////////////////
+
 // insert symbol
 pub(crate) const INSERT_SYMBOL: &'static str = "
-    INSERT INTO crypto.symbols (pk, symbol)
+    INSERT INTO crypto.symbols (symbol)
     VALUES ($1)
     ON CONFLICT (pk)
     DO NOTHING
