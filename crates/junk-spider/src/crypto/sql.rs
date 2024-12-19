@@ -1,3 +1,19 @@
+#![allow(dead_code)]
+
+use std::collections::HashMap;
+
+// interval pk mappings
+lazy_static::lazy_static! {
+    pub(crate) static ref INTERVAL_PKS: HashMap<String, i32> = {
+        let mut map = HashMap::new();
+        map.insert("30m".to_string(), 1);
+        map.insert("1h".to_string(), 2);
+        map.insert("1d".to_string(), 3);
+        map.insert("1w".to_string(), 4);
+        map
+    };
+}
+
 ///////////////////////////////////////////////////////
 // prices
 ///////////////////////////////////////////////////////
@@ -5,20 +21,19 @@
 // insert price cell
 pub(crate) const INSERT_PRICE: &'static str = "
     INSERT INTO crypto.prices (
-        pk, 
+        symbol_pk, 
         time, 
-        interval, 
+        interval_pk, 
         opening, 
         high, 
         low, 
         closing, 
         volume, 
         trades, 
-        quote_asset_volume, 
-        exchange
+        source_pk
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-    ON CONFLICT (pk, time, interval, exchange)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    ON CONFLICT (symbol_pk, time, interval_pk, source_pk)
     DO NOTHING
 ";
 
@@ -30,7 +45,7 @@ pub(crate) const INSERT_PRICE: &'static str = "
 pub(crate) const INSERT_SOURCE: &'static str = "
     INSERT INTO crypto.sources (pk, source)
     VALUES ($1)
-    ON CONFLICT (pk)
+    ON CONFLICT (source)
     DO NOTHING
 ";
 
@@ -48,7 +63,7 @@ pub(crate) const SELECT_SOURCE_PK: &'static str = "
 pub(crate) const INSERT_SYMBOL: &'static str = "
     INSERT INTO crypto.symbols (symbol)
     VALUES ($1)
-    ON CONFLICT (pk)
+    ON CONFLICT (symbol)
     DO NOTHING
 ";
 

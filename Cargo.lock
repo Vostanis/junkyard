@@ -828,8 +828,10 @@ dependencies = [
  "chrono",
  "dotenv",
  "futures",
+ "lazy_static",
  "reqwest",
  "serde",
+ "tokio",
  "tokio-postgres",
  "tracing",
 ]

@@ -35,7 +35,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .json()
         .await
         .map_err(|err| {
-            error!("failed to parse Binance tickers");
+            error!("failed to dserialize Binance tickers");
             err
         })?;
 
@@ -60,44 +60,79 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .query("SELECT pk, symbol FROM crypto.symbols", &[])
         .await
         .map_err(|err| {
-            error!("failed to fetch Binance symbols");
+            error!("failed to fetch crypto.symbols");
             err
         })?;
-    let mut pks: HashMap<String, i32> = HashMap::new();
+    let mut symbol_pks: HashMap<String, i32> = HashMap::new();
     for row in rows {
         let pk: i32 = row.get("pk");
         let symbol: String = row.get("symbol");
-        pks.insert(symbol, pk);
+        symbol_pks.insert(symbol, pk);
     }
-    let pks = Arc::new(pks);
+    let symbol_pks = Arc::new(symbol_pks);
 
-    let count = Arc::new(std::sync::Mutex::new(0));
+    // 3b. fetch sources
+    let rows = pg_client
+        .query("SELECT pk, source FROM crypto.sources", &[])
+        .await
+        .map_err(|err| {
+            error!("failed to fetch crypto.sources");
+            err
+        })?;
+    let mut source_pks: HashMap<String, i32> = HashMap::new();
+    for row in rows {
+        let pk: i32 = row.get("pk");
+        let source: String = row.get("source");
+        source_pks.insert(source, pk);
+    }
+    let source_pk = match source_pks.get("Binance") {
+        Some(pk) => pk,
+        None => {
+            error!("failed to find Binance source pk");
+            return Err(anyhow::anyhow!("failed to find Binance source pk"));
+        }
+    };
 
+    use tokio::sync::Mutex;
+    let pg_client = Arc::new(Mutex::new(pg_client));
+
+    // 3c. fetch prices for tickers
     let stream = stream::iter(&tickers.0);
     stream
-        .for_each_concurrent(12, |ticker| {
+        .for_each_concurrent(3, |ticker| {
             let http_client = &http_client;
-            let pks = &pks;
+            let pg_client = pg_client.clone();
+            let symbol_pks = &symbol_pks;
             let symbol = &ticker.symbol;
-            let count = count.clone();
+            let source_pk = &source_pk;
             async move {
-                if let Some(symbol_pk) = pks.get(symbol) {
+                if let Some(symbol_pk) = symbol_pks.get(symbol) {
                     trace!("fetching prices for {}", symbol);
                     let url = format!("https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000");
-                    let klines: Klines = http_client
-                        .get(url)
-                        .send()
-                        .await
-                        .unwrap()
-                        .json()
-                        .await
-                        .unwrap();
-                    let mut count = count.lock().unwrap();
-                    *count += 1;
+                    let response = match http_client.get(url).send().await {
+                        Ok(data) => data,
+                        Err(err) => {
+                            error!("failed to fetch Binance prices for {}, error({err})", &ticker.symbol);
+                            return;
+                        }
+                    };
 
-                    tracing::info!("count: {}", *count);
+                    trace!("deserializing prices for {}", symbol);
+                    let klines: Klines = match response.json().await {
+                        Ok(data) => data,
+                        Err(err) => {
+                            error!("failed to parse Binance prices for {symbol}, error({err})");
+                            return;
+                        }
+                    };
+
+                    let mut pg_client = pg_client.lock().await;
+                    match klines.insert(&mut pg_client, symbol, *symbol_pk, **source_pk).await {
+                        Ok(_) => debug!("inserted prices for {symbol}"),
+                        Err(err) => error!("failed to insert prices for {symbol}, error({err})"),
+                    };
                 } else {
-                    error!("failed to find symbol pk for {}", &ticker.symbol);
+                    error!("failed to find symbol pk for {symbol}");
                 }
             }
         })
@@ -165,7 +200,7 @@ impl Tickers {
         // iterate over the data stream and execute pg rows
         let stream = stream::iter(&self.0);
         stream
-            .for_each_concurrent(12, |ticker| {
+            .for_each_concurrent(3, |ticker| {
                 let query = query.clone();
                 let transaction = transaction.clone();
                 async move {
@@ -292,10 +327,16 @@ impl<'de> Visitor<'de> for Kline {
 
 impl Klines {
     // insert the vector of Klines to pg rows
-    async fn insert(self, pg_client: &mut PgClient, ticker: Ticker, pk: i32) -> anyhow::Result<()> {
+    async fn insert(
+        self,
+        pg_client: &mut PgClient,
+        symbol: &String,
+        symbol_pk: i32,
+        source_pk: i32,
+    ) -> anyhow::Result<()> {
         // start the clock
         let time = std::time::Instant::now();
-        debug!("inserting price data for {} from Binance", &ticker.symbol);
+        debug!("inserting price data for {} from Binance", symbol);
 
         // preprocess pg query as transaction
         let query = pg_client.prepare(sql::INSERT_PRICE).await?;
@@ -304,35 +345,34 @@ impl Klines {
         // iterate over the data stream and execute pg rows
         let stream = stream::iter(self.0);
         stream
-            .for_each_concurrent(12, |cell| {
+            .for_each_concurrent(3, |cell| {
                 let query = query.clone();
                 let transaction = transaction.clone();
-                let symbol = &ticker.symbol;
+                let symbol = &symbol;
                 async move {
                     let result = transaction
                         .execute(
                             &query,
                             &[
-                                &pk,
-                                &chrono::DateTime::from_timestamp_millis(cell.timestamp),
-                                &"1d",
+                                &symbol_pk,
+                                &chrono::DateTime::from_timestamp_millis(cell.timestamp)
+                                    .expect("i64 -> DateTime"),
+                                &3,
                                 &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
                                 &cell.high.parse::<f64>().expect("String -> f64 High"),
                                 &cell.low.parse::<f64>().expect("String -> f64 Low"),
                                 &cell.closing.parse::<f64>().expect("String -> f64 Closing"),
                                 &cell.volume.parse::<f64>().expect("String -> f64 Volume"),
                                 &cell.trades,
-                                &None::<f64>,
-                                &"Binance",
+                                &source_pk,
                             ],
                         )
                         .await;
 
                     match result {
-                        Ok(_) => trace!("inserting Binance price data for {}", symbol),
+                        Ok(_) => trace!("inserting Binance price data for {symbol}"),
                         Err(err) => error!(
-                            "failed to insert price data for {} from Binance | ERROR: {}",
-                            symbol, err
+                            "failed to insert price data for {symbol} from Binance, err({err})"
                         ),
                     }
                 }
@@ -345,10 +385,7 @@ impl Klines {
             .commit()
             .await
             .map_err(|err| {
-                error!(
-                    "failed to commit transaction for {} from Binance",
-                    &ticker.symbol
-                );
+                error!("failed to commit transaction for {symbol} from Binance, error({err})");
                 err
             })?;
 
