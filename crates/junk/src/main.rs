@@ -17,7 +17,7 @@ fn preprocess(trace_level: Level) {
     subscriber::set_global_default(my_subscriber).expect("Set subscriber");
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 24)]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 

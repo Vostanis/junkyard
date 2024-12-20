@@ -102,7 +102,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     info!("fetching prices ...");
     let stream = stream::iter(&tickers.0);
     stream
-        .for_each_concurrent(3, |ticker| {
+        .for_each_concurrent(12, |ticker| {
             let http_client = &http_client;
             let pg_client = pg_client.clone();
             let symbol_pks = &symbol_pks;
@@ -111,11 +111,16 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             async move {
                 if let Some(symbol_pk) = symbol_pks.get(symbol) {
                     trace!("fetching prices for {}", symbol);
-                    let url = format!("https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000");
+                    let url = format!(
+                    "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000"
+                );
                     let response = match http_client.get(url).send().await {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to fetch Binance prices for {}, error({err})", &ticker.symbol);
+                            error!(
+                                "failed to fetch Binance prices for {}, error({err})",
+                                &ticker.symbol
+                            );
                             return;
                         }
                     };
@@ -130,7 +135,10 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     };
 
                     let mut pg_client = pg_client.lock().await;
-                    match klines.insert(&mut pg_client, symbol, *symbol_pk, *source_pk).await {
+                    match klines
+                        .insert(&mut pg_client, symbol, *symbol_pk, *source_pk)
+                        .await
+                    {
                         Ok(_) => trace!("inserted prices for {symbol}"),
                         Err(err) => error!("failed to insert prices for {symbol}, error({err})"),
                     };
@@ -200,30 +208,29 @@ impl Tickers {
         let transaction = Arc::new(pg_client.transaction().await?);
 
         // iterate over the data stream and execute pg rows
-        let stream = stream::iter(&self.0);
-        stream
-            .for_each_concurrent(3, |ticker| {
-                let query = query.clone();
-                let transaction = transaction.clone();
-                async move {
-                    let result = transaction
-                        .execute(&query, &[&ticker.symbol])
-                        .await
-                        .map_err(|err| {
-                            error!("failed to insert symbol data for Binance");
-                            err
-                        });
+        let mut stream = stream::iter(&self.0);
+        while let Some(ticker) = stream.next().await {
+            let query = query.clone();
+            let transaction = transaction.clone();
+            async move {
+                let result = transaction
+                    .execute(&query, &[&ticker.symbol])
+                    .await
+                    .map_err(|err| {
+                        error!("failed to insert symbol data for Binance");
+                        err
+                    });
 
-                    match result {
-                        Ok(_) => trace!("inserting Binance symbol data for {}", &ticker.symbol),
-                        Err(err) => error!(
-                            "failed to insert symbol data for {} from Binance | ERROR: {}",
-                            &ticker.symbol, err
-                        ),
-                    };
-                }
-            })
+                match result {
+                    Ok(_) => trace!("inserting Binance symbol data for {}", &ticker.symbol),
+                    Err(err) => error!(
+                        "failed to insert symbol data for {} from Binance | ERROR: {}",
+                        &ticker.symbol, err
+                    ),
+                };
+            }
             .await;
+        }
 
         // unpack the transcation and commit it to the database
         Arc::into_inner(transaction)
@@ -344,42 +351,41 @@ impl Klines {
         let transaction = Arc::new(pg_client.transaction().await?);
 
         // iterate over the data stream and execute pg rows
-        let stream = stream::iter(self.0);
-        stream
-            .for_each_concurrent(3, |cell| {
-                let query = query.clone();
-                let transaction = transaction.clone();
-                let symbol = &symbol;
-                let interval_pk: i16 = 3;
-                async move {
-                    let result = transaction
-                        .execute(
-                            &query,
-                            &[
-                                &symbol_pk,
-                                &chrono::DateTime::from_timestamp_millis(cell.timestamp)
-                                    .expect("i64 -> DateTime"),
-                                &interval_pk,
-                                &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
-                                &cell.high.parse::<f64>().expect("String -> f64 High"),
-                                &cell.low.parse::<f64>().expect("String -> f64 Low"),
-                                &cell.closing.parse::<f64>().expect("String -> f64 Closing"),
-                                &cell.volume.parse::<f64>().expect("String -> f64 Volume"),
-                                &cell.trades,
-                                &source_pk,
-                            ],
-                        )
-                        .await;
+        let mut stream = stream::iter(self.0);
+        while let Some(cell) = stream.next().await {
+            let query = query.clone();
+            let transaction = transaction.clone();
+            let symbol = &symbol;
+            let interval_pk: i16 = 3;
+            async move {
+                let result = transaction
+                    .execute(
+                        &query,
+                        &[
+                            &symbol_pk,
+                            &chrono::DateTime::from_timestamp_millis(cell.timestamp)
+                                .expect("i64 -> DateTime"),
+                            &interval_pk,
+                            &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
+                            &cell.high.parse::<f64>().expect("String -> f64 High"),
+                            &cell.low.parse::<f64>().expect("String -> f64 Low"),
+                            &cell.closing.parse::<f64>().expect("String -> f64 Closing"),
+                            &cell.volume.parse::<f64>().expect("String -> f64 Volume"),
+                            &cell.trades,
+                            &source_pk,
+                        ],
+                    )
+                    .await;
 
-                    match result {
-                        Ok(_) => trace!("inserting Binance price data for {symbol}"),
-                        Err(err) => error!(
-                            "failed to insert price data for {symbol} from Binance, err({err})"
-                        ),
+                match result {
+                    Ok(_) => trace!("inserting Binance price data for {symbol}"),
+                    Err(err) => {
+                        error!("failed to insert price data for {symbol} from Binance, err({err})")
                     }
                 }
-            })
+            }
             .await;
+        }
 
         // unpack the transcation and commit it to the database
         Arc::into_inner(transaction)
