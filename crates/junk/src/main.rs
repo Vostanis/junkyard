@@ -59,7 +59,8 @@ async fn main() -> anyhow::Result<()> {
             debug!("findump connection established");
 
             // 2. match pre-built endpoints to scrape
-            spider::crypto::binance::scrape(&mut pg_client).await?;
+            // spider::crypto::binance::scrape(&mut pg_client).await?;
+            spider::crypto::kucoin::scrape(&mut pg_client).await?;
 
             // match subcommand somehow
         }

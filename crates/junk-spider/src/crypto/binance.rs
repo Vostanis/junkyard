@@ -20,7 +20,6 @@ use tracing::{debug, error, info, trace};
 /////////////////////////////////////////////////////////////////////////////////
 
 pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
-    // build the client
     let http_client = build_client();
 
     // fetch the tickers
@@ -52,7 +51,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         })?;
 
     // 2. insert tickers
-    tickers.scrape(pg_client).await?;
+    tickers.insert(pg_client).await?;
 
     // 3. fetch & insert prices (using the previous 2 datatables)
     // 3a. fetch symbols
@@ -170,10 +169,9 @@ fn build_client() -> HttpClient {
 /////////////////////////////////////////////////////////////////////////////////
 // endpoints
 /////////////////////////////////////////////////////////////////////////////////
-
+//
 // tickers
 // ----------------------------------------------------------------
-// > de
 // [
 //  {
 //      "symbol": "ETHBTC",
@@ -200,7 +198,7 @@ struct Ticker {
 }
 
 impl Tickers {
-    async fn scrape(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
+    async fn insert(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
         let time = std::time::Instant::now();
 
         // preprocess pg query as transaction
@@ -250,8 +248,6 @@ impl Tickers {
         Ok(())
     }
 }
-
-// > sql
 
 // prices
 // ----------------------------------------------------------------
@@ -343,7 +339,6 @@ impl Klines {
         symbol_pk: i32,
         source_pk: i16,
     ) -> anyhow::Result<()> {
-        // start the clock
         let time = std::time::Instant::now();
 
         // preprocess pg query as transaction

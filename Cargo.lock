@@ -825,12 +825,15 @@ name = "junk-spider"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "dotenv",
  "futures",
+ "hmac",
  "lazy_static",
  "reqwest",
  "serde",
+ "sha2",
  "tokio",
  "tokio-postgres",
  "tracing",
