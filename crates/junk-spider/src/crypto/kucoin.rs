@@ -8,8 +8,9 @@ use reqwest::header::HeaderValue;
 use serde::de::{SeqAccess, Visitor};
 use serde::Deserialize;
 use sha2::Sha256;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 // RATE_LIMIT = 4000 /30s
 //
@@ -42,7 +43,109 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             err
         })?;
 
-    println!("{:#?}", tickers.data.ticker);
+    tickers.insert(pg_client).await?;
+
+    // 3. fetch & insert prices (using the previous 2 datatables)
+    // 3a. fetch symbols
+    info!("fetching symbols ...");
+    let rows = pg_client
+        .query("SELECT pk, symbol FROM crypto.symbols", &[])
+        .await
+        .map_err(|err| {
+            error!("failed to fetch crypto.symbols");
+            err
+        })?;
+    let mut symbol_pks: HashMap<String, i32> = HashMap::new();
+    for row in rows {
+        let pk: i32 = row.get("pk");
+        let symbol: String = row.get("symbol");
+        symbol_pks.insert(symbol, pk);
+    }
+    let symbol_pks = Arc::new(symbol_pks);
+
+    // 3b. fetch sources
+    info!("fetching sources ...");
+    let rows = pg_client
+        .query("SELECT pk, source FROM crypto.sources", &[])
+        .await
+        .map_err(|err| {
+            error!("failed to fetch crypto.sources");
+            err
+        })?;
+    let mut source_pks: HashMap<String, i16> = HashMap::new();
+    for row in rows {
+        let pk: i16 = row.get("pk");
+        let source: String = row.get("source");
+        source_pks.insert(source, pk);
+    }
+    let source_pk = match source_pks.get("Binance") {
+        Some(pk) => *pk,
+        None => {
+            error!("failed to find Binance source pk");
+            return Err(anyhow::anyhow!("failed to find Binance source pk"));
+        }
+    };
+
+    use tokio::sync::Mutex;
+    let pg_client = Arc::new(Mutex::new(pg_client));
+
+    // 3c. fetch prices for tickers
+    info!("fetching prices ...");
+    let stream = stream::iter(&tickers.data.ticker);
+    stream.for_each_concurrent(12, |ticker| {
+        let http_client = &http_client;
+        let pg_client = pg_client.clone();
+        let symbol_pks = &symbol_pks;
+        let symbol = &ticker.symbol;
+        let source_pk = &source_pk;
+        let private = var("KUCOIN_PRIVATE").expect("KUCOIN_PRIVATE not found");
+        let passphrase = var("KUCOIN_PASSPHRASE").expect("KUCOIN_PASSPHRASE not found");
+
+        async move {
+            if let Some(symbol_pk) = symbol_pks.get(symbol) {
+                trace!("fetching prices for {}", symbol);
+                let url = format!(
+                    "https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol}"
+                );
+                let timestamp = timestamp();
+                let passphrase = encrypt(private.clone(), passphrase);
+                let sign = sign(&url, private, timestamp.clone());
+                let response = match http_client
+                    .get(url)
+                    .header("KC-API-TIMESTAMP", timestamp)
+                    .header("KC-API-PASSPHRASE", passphrase)
+                    .header("KC-API-SIGN", sign)
+                    .send()
+                    .await
+                {
+                    Ok(data) => data,
+                    Err(err) => {
+                        error!("failed to fetch KuCoin prices, error({err})");
+                        return;
+                    }
+                };
+
+                let klines: Klines = match response.json().await {
+                    Ok(data) => data,
+                    Err(err) => {
+                        error!("failed to deserialize KuCoin prices, error({err})");
+                        return;
+                    }
+                };
+
+                let mut pg_client = pg_client.lock().await;
+                match klines
+                    .insert(&mut pg_client, symbol.to_string(), *symbol_pk, *source_pk)
+                    .await
+                {
+                    Ok(_) => trace!("inserted prices for {symbol}"),
+                    Err(err) => error!("failed to insert prices for {symbol}, error({err})"),
+                };
+            } else {
+                error!("failed to find symbol pk for {symbol}");
+            }
+        }
+    });
 
     Ok(())
 }
@@ -153,7 +256,55 @@ where
 }
 
 impl KuCoinTickerResponse {
-    async fn insert(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {}
+    async fn insert(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
+        let time = std::time::Instant::now();
+
+        // preprocess pg query as transaction
+        let query = pg_client.prepare(sql::INSERT_SYMBOL).await?;
+        let transaction = Arc::new(pg_client.transaction().await?);
+
+        // iterate over the data stream and execute pg rows
+        let mut stream = stream::iter(&self.data.ticker);
+        while let Some(ticker) = stream.next().await {
+            let query = query.clone();
+            let transaction = transaction.clone();
+            async move {
+                let result = transaction
+                    .execute(&query, &[&ticker.symbol])
+                    .await
+                    .map_err(|err| {
+                        error!("failed to insert symbol data for Binance");
+                        err
+                    });
+
+                match result {
+                    Ok(_) => trace!("inserting KuCoin symbol data for {}", &ticker.symbol),
+                    Err(err) => error!(
+                        "failed to insert symbol data for {} from KuCoin, error({})",
+                        &ticker.symbol, err
+                    ),
+                };
+            }
+            .await;
+        }
+
+        // unpack the transcation and commit it to the database
+        Arc::into_inner(transaction)
+            .expect("failed to unpack Transaction from Arc")
+            .commit()
+            .await
+            .map_err(|e| {
+                error!("failed to commit transaction for symbols from Binance");
+                e
+            })?;
+
+        debug!(
+            "ticker data collected from KuCoin, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            time.elapsed().as_millis()
+        );
+
+        Ok(())
+    }
 }
 
 // prices

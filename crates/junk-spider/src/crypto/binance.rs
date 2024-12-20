@@ -222,7 +222,7 @@ impl Tickers {
                 match result {
                     Ok(_) => trace!("inserting Binance symbol data for {}", &ticker.symbol),
                     Err(err) => error!(
-                        "failed to insert symbol data for {} from Binance | ERROR: {}",
+                        "failed to insert symbol data for {} from Binance, error({})",
                         &ticker.symbol, err
                     ),
                 };
