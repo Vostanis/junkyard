@@ -7,6 +7,7 @@ use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
 // RATE_LIMIT = 1200 /60s
@@ -94,7 +95,6 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         }
     };
 
-    use tokio::sync::Mutex;
     let pg_client = Arc::new(Mutex::new(pg_client));
 
     // 3c. fetch prices for tickers
@@ -111,8 +111,8 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                 if let Some(symbol_pk) = symbol_pks.get(symbol) {
                     trace!("fetching prices for {}", symbol);
                     let url = format!(
-                    "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000"
-                );
+                        "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000"
+                    );
                     let response = match http_client.get(url).send().await {
                         Ok(data) => data,
                         Err(err) => {

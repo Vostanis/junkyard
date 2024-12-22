@@ -5,11 +5,12 @@ use dotenv::var;
 use futures::{stream, StreamExt};
 use hmac::{Hmac, Mac};
 use reqwest::header::HeaderValue;
-use serde::de::{SeqAccess, Visitor};
+use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
 // RATE_LIMIT = 4000 /30s
@@ -33,16 +34,29 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .send()
         .await
         .map_err(|err| {
-            error!("failed to fetch Binance tickers");
+            error!("failed to fetch KuCoin tickers");
             err
         })?
         .json()
         .await
         .map_err(|err| {
-            error!("failed to dserialize Binance tickers");
+            error!("failed to dserialize KuCoin tickers");
             err
         })?;
 
+    // 1. insert kucoin source
+    pg_client
+        .query(
+            "INSERT INTO crypto.sources (source) VALUES ('KuCoin') ON CONFLICT DO NOTHING",
+            &[],
+        )
+        .await
+        .map_err(|err| {
+            error!("failed to insert KuCoin as a source");
+            err
+        })?;
+
+    // 2. insert tickers to pg rows
     tickers.insert(pg_client).await?;
 
     // 3. fetch & insert prices (using the previous 2 datatables)
@@ -78,74 +92,77 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         let source: String = row.get("source");
         source_pks.insert(source, pk);
     }
-    let source_pk = match source_pks.get("Binance") {
+    let source_pk = match source_pks.get("KuCoin") {
         Some(pk) => *pk,
         None => {
-            error!("failed to find Binance source pk");
-            return Err(anyhow::anyhow!("failed to find Binance source pk"));
+            error!("failed to find KuCoin source pk");
+            return Err(anyhow::anyhow!("failed to find KuCoin source pk"));
         }
     };
 
-    use tokio::sync::Mutex;
     let pg_client = Arc::new(Mutex::new(pg_client));
 
     // 3c. fetch prices for tickers
     info!("fetching prices ...");
     let stream = stream::iter(&tickers.data.ticker);
-    stream.for_each_concurrent(12, |ticker| {
-        let http_client = &http_client;
-        let pg_client = pg_client.clone();
-        let symbol_pks = &symbol_pks;
-        let symbol = &ticker.symbol;
-        let source_pk = &source_pk;
-        let private = var("KUCOIN_PRIVATE").expect("KUCOIN_PRIVATE not found");
-        let passphrase = var("KUCOIN_PASSPHRASE").expect("KUCOIN_PASSPHRASE not found");
+    stream
+        .for_each_concurrent(12, |ticker| {
+            let http_client = &http_client;
+            let pg_client = pg_client.clone();
+            let symbol_pks = &symbol_pks;
+            let symbol = &ticker.symbol;
+            let source_pk = &source_pk;
+            let private = var("KUCOIN_PRIVATE").expect("KUCOIN_PRIVATE not found");
+            let passphrase = var("KUCOIN_PASSPHRASE").expect("KUCOIN_PASSPHRASE not found");
 
-        async move {
-            if let Some(symbol_pk) = symbol_pks.get(symbol) {
-                trace!("fetching prices for {}", symbol);
-                let url = format!(
-                    "https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol}"
-                );
-                let timestamp = timestamp();
-                let passphrase = encrypt(private.clone(), passphrase);
-                let sign = sign(&url, private, timestamp.clone());
-                let response = match http_client
-                    .get(url)
-                    .header("KC-API-TIMESTAMP", timestamp)
-                    .header("KC-API-PASSPHRASE", passphrase)
-                    .header("KC-API-SIGN", sign)
-                    .send()
-                    .await
-                {
-                    Ok(data) => data,
-                    Err(err) => {
-                        error!("failed to fetch KuCoin prices, error({err})");
-                        return;
-                    }
-                };
+            async move {
+                if let Some(symbol_pk) = symbol_pks.get(&symbol.replace("-", "")) {
+                    trace!("fetching prices for {}", symbol);
+                    let url = format!(
+                        "https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol}"
+                    );
+                    let timestamp = timestamp();
+                    let passphrase = encrypt(private.clone(), passphrase);
+                    let sign = sign(&url, private, timestamp.clone());
+                    let response = match http_client
+                        .get(url)
+                        .header("KC-API-TIMESTAMP", timestamp)
+                        .header("KC-API-PASSPHRASE", passphrase)
+                        .header("KC-API-SIGN", sign)
+                        .send()
+                        .await
+                    {
+                        Ok(data) => data,
+                        Err(err) => {
+                            error!("failed to fetch KuCoin prices, error({err})");
+                            return;
+                        }
+                    };
 
-                let klines: Klines = match response.json().await {
-                    Ok(data) => data,
-                    Err(err) => {
-                        error!("failed to deserialize KuCoin prices, error({err})");
-                        return;
-                    }
-                };
+                    let klines: Klines = match response.json().await {
+                        Ok(data) => data,
+                        Err(err) => {
+                            error!(
+                                "failed to deserialize KuCoin prices for {symbol}, error({err})"
+                            );
+                            return;
+                        }
+                    };
 
-                let mut pg_client = pg_client.lock().await;
-                match klines
-                    .insert(&mut pg_client, symbol.to_string(), *symbol_pk, *source_pk)
-                    .await
-                {
-                    Ok(_) => trace!("inserted prices for {symbol}"),
-                    Err(err) => error!("failed to insert prices for {symbol}, error({err})"),
-                };
-            } else {
-                error!("failed to find symbol pk for {symbol}");
+                    let mut pg_client = pg_client.lock().await;
+                    match klines
+                        .insert(&mut pg_client, symbol.to_string(), *symbol_pk, *source_pk)
+                        .await
+                    {
+                        Ok(_) => trace!("inserted prices for {symbol}"),
+                        Err(err) => error!("failed to insert prices for {symbol}, error({err})"),
+                    };
+                } else {
+                    error!("failed to find symbol pk for {symbol}");
+                }
             }
-        }
-    });
+        })
+        .await;
 
     Ok(())
 }
@@ -242,17 +259,7 @@ struct KuCoinData {
 
 #[derive(Debug, Deserialize)]
 struct Ticker {
-    #[serde(deserialize_with = "de_symbol")]
     symbol: String,
-}
-
-/// Remove any dashes from KuCoin symbols, e.g. "BTC-USDT" -> "BTCUSDT"
-fn de_symbol<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: serde::de::Deserializer<'de>,
-{
-    let value: String = Deserialize::deserialize(deserializer)?;
-    Ok(value.replace("-", ""))
 }
 
 impl KuCoinTickerResponse {
@@ -270,10 +277,10 @@ impl KuCoinTickerResponse {
             let transaction = transaction.clone();
             async move {
                 let result = transaction
-                    .execute(&query, &[&ticker.symbol])
+                    .execute(&query, &[&ticker.symbol.replace("-", "")])
                     .await
                     .map_err(|err| {
-                        error!("failed to insert symbol data for Binance");
+                        error!("failed to insert symbol data for KuCoin");
                         err
                     });
 
@@ -294,7 +301,7 @@ impl KuCoinTickerResponse {
             .commit()
             .await
             .map_err(|e| {
-                error!("failed to commit transaction for symbols from Binance");
+                error!("failed to commit transaction for symbols from KuCoin");
                 e
             })?;
 
@@ -326,7 +333,9 @@ impl KuCoinTickerResponse {
 //  ...
 // ]
 #[derive(Deserialize, Debug)]
-pub struct Klines(Vec<Kline>);
+pub struct Klines {
+    data: Vec<Kline>,
+}
 
 #[derive(Deserialize, Debug)]
 struct Kline {
@@ -336,7 +345,7 @@ struct Kline {
     high: String,
     low: String,
     volume: String,
-    turnover: String,
+    _turnover: IgnoredAny,
 }
 
 impl<'de> Visitor<'de> for Kline {
@@ -357,7 +366,7 @@ impl<'de> Visitor<'de> for Kline {
             high: seq.next_element()?.expect("String high"),
             low: seq.next_element()?.expect("String low"),
             volume: seq.next_element()?.expect("String volume"),
-            turnover: seq.next_element()?.expect("String turnover"),
+            _turnover: seq.next_element::<IgnoredAny>()?.expect("String turnover"),
         })
     }
 }
@@ -378,7 +387,7 @@ impl Klines {
         let transaction = Arc::new(pg_client.transaction().await?);
 
         // iterate over the data stream and execute pg rows
-        let mut stream = stream::iter(self.0);
+        let mut stream = stream::iter(self.data);
         while let Some(cell) = stream.next().await {
             let query = query.clone();
             let transaction = transaction.clone();
@@ -400,10 +409,7 @@ impl Klines {
                             &cell.low.parse::<f64>().expect("String -> f64 Opening"),
                             &cell.closing.parse::<f64>().expect("String -> f64 Opening"),
                             &cell.volume.parse::<f64>().expect("String -> f64 Opening"),
-                            &cell
-                                .turnover
-                                .parse::<f64>()
-                                .expect("String -> f64 Turnover"),
+                            &None::<i64>,
                             &source_pk,
                         ],
                     )

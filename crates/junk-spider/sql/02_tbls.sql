@@ -3,6 +3,7 @@
 --------------------------------------------------------------------------------------- 
 
 -- data intervals, e.g., 1m, 5m, 1hr, 1d, 1wk, 1mo, 1yr
+-- currently only supporting 30m, 1h, 1d, 1w; only 1d being used
 CREATE TABLE IF NOT EXISTS common.intervals (
 	pk SMALLSERIAL PRIMARY KEY,
 	interval CHAR(3) NOT NULL
