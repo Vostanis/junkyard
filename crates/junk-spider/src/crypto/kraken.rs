@@ -1,13 +1,10 @@
 use super::sql;
 use crate::http::*;
-use base64::prelude::{Engine, BASE64_STANDARD};
 use dotenv::var;
 use futures::{stream, StreamExt};
-use hmac::{Hmac, Mac};
 use reqwest::header::HeaderValue;
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
-use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -15,7 +12,7 @@ use tracing::{debug, error, info, trace};
 
 const BROKERAGE: &'static str = "Kraken";
 
-// RATE_LIMIT = 60 /1s
+// RATE_LIMIT = 15 /1s
 //
 // tickers = `https://api.kucoin.com/api/v1/market/allTickers`
 //
@@ -31,7 +28,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     let http_client = build_client();
 
     // fetch the tickers
-    let tickers: KuCoinTickerResponse = http_client
+    let tickers: KrakenSymbols = http_client
         .get("https://api.kraken.com/0/public/AssetPairs")
         .send()
         .await
@@ -106,31 +103,25 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
 
     // 3c. fetch prices for tickers
     info!("fetching prices ...");
-    let stream = stream::iter(&tickers.data.ticker);
+    let stream = stream::iter(&tickers.result);
     stream
-        .for_each_concurrent(12, |ticker| {
+        .for_each_concurrent(12, |(_key, value)| {
             let http_client = &http_client;
             let pg_client = pg_client.clone();
             let symbol_pks = &symbol_pks;
-            let symbol = &ticker.symbol;
+            let symbol = &value.altname;
             let source_pk = &source_pk;
-            let private = var("KUCOIN_PRIVATE").expect("KUCOIN_PRIVATE not found");
-            let passphrase = var("KUCOIN_PASSPHRASE").expect("KUCOIN_PASSPHRASE not found");
 
             async move {
-                if let Some(symbol_pk) = symbol_pks.get(&symbol.replace("-", "")) {
+                if let Some(symbol_pk) = symbol_pks.get(symbol) {
                     trace!("fetching prices for {}", symbol);
                     let url = format!(
-                        "https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol}"
+                        // NOTE: intervals are in minute intervals
+                        // 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+                        "https://api.kraken.com/0/public/OHLC?interval=1440&pair={symbol}"
                     );
-                    let timestamp = timestamp();
-                    let passphrase = encrypt(private.clone(), passphrase);
-                    let sign = sign(&url, private, timestamp.clone());
                     let response = match http_client
                         .get(url)
-                        .header("KC-API-TIMESTAMP", timestamp)
-                        .header("KC-API-PASSPHRASE", passphrase)
-                        .header("KC-API-SIGN", sign)
                         .send()
                         .await
                     {
@@ -172,44 +163,40 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
 fn build_client() -> HttpClient {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
-        "KC-API-KEY",
-        HeaderValue::from_str(&var("KUCOIN_API").expect("KUCOIN_API not found"))
-            .expect("failed to set KUCOIN_API as X-MBX-APIKEY header"),
-    );
-    headers.insert(
-        "KC-API-VERSION",
-        HeaderValue::from_str(&"2").expect("failed to set kc-api-version to \"2\""),
+        "API-Key",
+        HeaderValue::from_str(&var("KRAKEN_API").expect("KRAKEN_API not found"))
+            .expect("failed to set KRAKEN_API as API-Key header"),
     );
     let client = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .build()
-        .expect("KuCoin Client to build");
+        .expect("KRAKEN client to build");
     client
 }
 
-// security
-// ----------------------------------------------------------------
+// // security
+// // ----------------------------------------------------------------
+// //
+// // https://docs.kraken.com/api/docs/guides/spot-rest-auth
 //
-// https://www.kucoin.com/docs/basic-info/connection-method/authentication/signing-a-message
-
-fn encrypt(secret: String, input: String) -> String {
-    type HmacSha256 = Hmac<Sha256>;
-    let mut mac = HmacSha256::new_from_slice(&secret.as_bytes()).unwrap();
-    mac.update(input.as_bytes());
-    let result = mac.finalize().into_bytes();
-    let b64 = BASE64_STANDARD.encode(&result);
-    b64
-}
-
-fn sign(url: &String, secret: String, timestamp: String) -> String {
-    let url = url.replace("https://api.kucoin.com", "");
-    let input = format!("{}{}{}", timestamp, "GET", url);
-    encrypt(secret, input)
-}
-
-fn timestamp() -> String {
-    chrono::Utc::now().timestamp_millis().to_string()
-}
+// fn encrypt(secret: String, input: String) -> String {
+//     type HmacSha256 = Hmac<Sha256>;
+//     let mut mac = HmacSha256::new_from_slice(&secret.as_bytes()).unwrap();
+//     mac.update(input.as_bytes());
+//     let result = mac.finalize().into_bytes();
+//     let b64 = BASE64_STANDARD.encode(&result);
+//     b64
+// }
+//
+// fn sign(url: &String, secret: String, nonce: &String) -> String {
+//     let url = url.replace("https://api.kraken.com", "");
+//     let input = format!("{}{}{}", nonce, "GET", url);
+//     encrypt(secret, input)
+// }
+//
+// fn nonce() -> String {
+//     chrono::Utc::now().timestamp_millis().to_string()
+// }
 
 /////////////////////////////////////////////////////////////////////////////////
 // endpoints
@@ -282,7 +269,7 @@ impl KrakenSymbols {
             })?;
 
         debug!(
-            "ticker data collected from KuCoin, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "ticker data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 
@@ -293,35 +280,49 @@ impl KrakenSymbols {
 // prices
 // ----------------------------------------------------------------
 //
-// [
-//   [
-//      time 	        // Start time of the candle cycle
-//      open 	        // Opening price
-//      close 	        // Closing price
-//      high 	        // Highest price
-//      low 	        // Lowest price
-//      volume 	        // Transaction volume(One-sided transaction volume)
-//      turnover 	// Transaction amount(One-sided transaction amount)
-//  ],
-//  [
-//      ...
-//  ],
-//  ...
-// ]
+//  {
+//      "error": [],
+//      "result": {
+//          "XXBTZUSD": [
+//              [
+//                  1688671200,
+//                  "30306.1",
+//                  "30306.2",
+//                  "30305.7",
+//                  "30305.7",
+//                  "30306.1",
+//                  "3.39243896",
+//                  23
+//              ],
+//              ...
+//          ],
+//      "last": 1678234233,
+//  }
 #[derive(Deserialize, Debug)]
 pub struct Klines {
-    data: Vec<Kline>,
+    result: ResultData,
+}
+
+#[derive(Deserialize, Debug)]
+struct ResultData {
+    #[serde(flatten)]
+    pairs: HashMap<String, Vec<Kline>>,
+
+    #[allow(dead_code)]
+    #[serde(skip_deserializing)]
+    last: u64,
 }
 
 #[derive(Deserialize, Debug)]
 struct Kline {
-    time: String,
+    time: i64,
     opening: String,
     closing: String,
     high: String,
     low: String,
+    _vwap: IgnoredAny,
     volume: String,
-    _turnover: IgnoredAny,
+    trades: i32,
 }
 
 impl<'de> Visitor<'de> for Kline {
@@ -336,13 +337,14 @@ impl<'de> Visitor<'de> for Kline {
         A: SeqAccess<'de>,
     {
         Ok(Kline {
-            time: seq.next_element()?.expect("String timestamp"),
+            time: seq.next_element()?.expect("i64 timestamp"),
             opening: seq.next_element()?.expect("String opening"),
             closing: seq.next_element()?.expect("String closing"),
             high: seq.next_element()?.expect("String high"),
             low: seq.next_element()?.expect("String low"),
+            _vwap: seq.next_element::<IgnoredAny>()?.expect("String volume"),
             volume: seq.next_element()?.expect("String volume"),
-            _turnover: seq.next_element::<IgnoredAny>()?.expect("String turnover"),
+            trades: seq.next_element()?.expect("i32 trades"),
         })
     }
 }
@@ -358,63 +360,67 @@ impl Klines {
     ) -> anyhow::Result<()> {
         let time = ::std::time::Instant::now();
 
-        // preprocess pg query as transaction
-        let query = pg_client.prepare(&sql::INSERT_PRICE).await?;
-        let transaction = Arc::new(pg_client.transaction().await?);
-
         // iterate over the data stream and execute pg rows
-        let mut stream = stream::iter(self.data);
-        while let Some(cell) = stream.next().await {
-            let query = query.clone();
-            let transaction = transaction.clone();
-            let symbol = &symbol;
-            let interval_pk: i16 = 3;
-            async move {
-                let result = transaction
-                    .execute(
-                        &query,
-                        &[
-                            &symbol_pk,
-                            &chrono::DateTime::from_timestamp(
-                                cell.time.parse::<i64>().expect("String -> i64 Time"),
-                                0,
-                            ),
-                            &interval_pk,
-                            &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
-                            &cell.high.parse::<f64>().expect("String -> f64 Opening"),
-                            &cell.low.parse::<f64>().expect("String -> f64 Opening"),
-                            &cell.closing.parse::<f64>().expect("String -> f64 Opening"),
-                            &cell.volume.parse::<f64>().expect("String -> f64 Opening"),
-                            &None::<i64>,
-                            &source_pk,
-                        ],
-                    )
-                    .await;
+        for (_result_symbol, klines) in self.result.pairs {
+            // preprocess pg query as transaction
+            let query = pg_client.prepare(&sql::INSERT_PRICE).await?;
+            let transaction = Arc::new(pg_client.transaction().await?);
 
-                match result {
-                    Ok(_) => trace!("inserting {BROKERAGE} price data for {symbol}"),
-                    Err(err) => {
-                        error!("failed to insert price data for {symbol} from {BROKERAGE}, error({err})")
+            let mut stream = stream::iter(klines);
+            while let Some(cell) = stream.next().await {
+                let query = query.clone();
+                let transaction = transaction.clone();
+                let symbol = &symbol;
+                let interval_pk: i16 = 3;
+                async move {
+                    let result = transaction
+                        .execute(
+                            &query,
+                            &[
+                                &symbol_pk,
+                                &chrono::DateTime::from_timestamp(
+                                    cell.time,
+                                    0,
+                                ),
+                                &interval_pk,
+                                &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
+                                &cell.high.parse::<f64>().expect("String -> f64 Opening"),
+                                &cell.low.parse::<f64>().expect("String -> f64 Opening"),
+                                &cell.closing.parse::<f64>().expect("String -> f64 Opening"),
+                                &cell.volume.parse::<f64>().expect("String -> f64 Opening"),
+                                &cell.trades,
+                                &source_pk,
+                            ],
+                        )
+                        .await;
+
+                    match result {
+                        Ok(_) => trace!("inserting {BROKERAGE} price data for {symbol}"),
+                        Err(err) => {
+                            error!("failed to insert price data for {symbol} from {BROKERAGE}, error({err})")
+                        }
                     }
                 }
+                .await;
             }
-            .await;
+
+            // unpack the transcation and commit it to the database
+            Arc::into_inner(transaction)
+                .expect("failed to unpack Transaction from Arc")
+                .commit()
+                .await
+                .map_err(|err| {
+                    error!(
+                        "failed to commit transaction for {symbol} from {BROKERAGE}, error({err})"
+                    );
+                    err
+                })?;
+
+            debug!(
+                "{symbol} price data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+                time.elapsed().as_millis()
+            );
         }
-
-        // unpack the transcation and commit it to the database
-        Arc::into_inner(transaction)
-            .expect("failed to unpack Transaction from Arc")
-            .commit()
-            .await
-            .map_err(|err| {
-                error!("failed to commit transaction for {symbol} from {BROKERAGE}, error({err})");
-                err
-            })?;
-
-        debug!(
-            "{symbol} price data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
-            time.elapsed().as_millis()
-        );
 
         Ok(())
     }
