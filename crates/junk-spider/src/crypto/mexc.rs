@@ -1,25 +1,20 @@
 use super::sql;
 use crate::http::*;
-use base64::prelude::{Engine, BASE64_STANDARD};
 use dotenv::var;
 use futures::{stream, StreamExt};
-use hmac::{Hmac, Mac};
 use reqwest::header::HeaderValue;
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
-use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
-// RATE_LIMIT = 4000 /30s
+// RATE_LIMIT = 500 /1s
 //
-// tickers = `https://api.kucoin.com/api/v1/market/allTickers`
+// tickers = `https://api.mexc.com/api/v3/ticker/bookTicker`
 //
-// NOTE: KuCoin symbols include a dash, e.g. BTC-USDT, or ETH-BTC
-//
-// klines = `https://api.kucoin.com/api/v1/market/candles?type=1day&symbol=BTC-USDT`, per symbol
+// klines = `https://api.mexc.com/api/v3/klines?symbol=BTCUSDT&interval=1d`, per symbol
 
 /////////////////////////////////////////////////////////////////////////////////
 // core
@@ -34,13 +29,13 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .send()
         .await
         .map_err(|err| {
-            error!("failed to fetch KuCoin tickers");
+            error!("failed to fetch MEXC tickers");
             err
         })?
         .json()
         .await
         .map_err(|err| {
-            error!("failed to dserialize KuCoin tickers");
+            error!("failed to dserialize MEXC tickers");
             err
         })?;
 
@@ -116,11 +111,13 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             async move {
                 if let Some(symbol_pk) = symbol_pks.get(symbol) {
                     trace!("fetching prices for {}", symbol);
-                    let url = format!("/api/v3/klines");
+                    let url = format!(
+                        "https://api.mexc.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000"
+                    );
                     let response = match http_client.get(url).send().await {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to fetch MEXC prices, error({err})");
+                            error!("failed to fetch MEXC prices for {symbol}, error({err})");
                             return;
                         }
                     };
@@ -128,10 +125,11 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     let klines: Klines = match response.json().await {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to deserialize MEXC prices, error({err})");
+                            error!("failed to deserialize MEXC prices for {symbol}, error({err})");
                             return;
                         }
                     };
+                    // println!("{:?}", klines);
 
                     let mut pg_client = pg_client.lock().await;
                     match klines
@@ -156,37 +154,13 @@ fn build_client() -> HttpClient {
     headers.insert(
         "apiKey",
         HeaderValue::from_str(&var("MEXC_API").expect("MEXC_API not found"))
-            .expect("failed to set KUCOIN_API as X-MBX-APIKEY header"),
+            .expect("failed to set MEXC_API as `apiKey` header"),
     );
     let client = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .build()
         .expect("MEXC client to build");
     client
-}
-
-// security
-// ----------------------------------------------------------------
-//
-// https://www.kucoin.com/docs/basic-info/connection-method/authentication/signing-a-message
-
-fn encrypt(secret: String, input: String) -> String {
-    type HmacSha256 = Hmac<Sha256>;
-    let mut mac = HmacSha256::new_from_slice(&secret.as_bytes()).unwrap();
-    mac.update(input.as_bytes());
-    let result = mac.finalize().into_bytes();
-    let b64 = BASE64_STANDARD.encode(&result);
-    b64
-}
-
-fn sign(url: &String, secret: String, timestamp: String) -> String {
-    let url = url.replace("https://api.kucoin.com", "");
-    let input = format!("{}{}{}", timestamp, "GET", url);
-    encrypt(secret, input)
-}
-
-fn timestamp() -> String {
-    chrono::Utc::now().timestamp_millis().to_string()
 }
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -272,9 +246,9 @@ impl Tickers {
             .expect("failed to unpack Transaction from Arc")
             .commit()
             .await
-            .map_err(|e| {
+            .map_err(|err| {
                 error!("failed to commit transaction for symbols from MEXC");
-                e
+                err
             })?;
 
         debug!(
@@ -289,15 +263,16 @@ impl Tickers {
 // prices
 // ----------------------------------------------------------------
 //
-// [
-//   [
-//      time 	        // Start time of the candle cycle
-//      open 	        // Opening price
-//      close 	        // Closing price
-//      high 	        // Highest price
-//      low 	        // Lowest price
-//      volume 	        // Transaction volume(One-sided transaction volume)
-//      turnover 	// Transaction amount(One-sided transaction amount)
+//[
+//  [
+//      1640804880000,
+//      "47482.36",
+//      "47482.36",
+//      "47416.57",
+//      "47436.1",
+//      "3.550717",
+//      1640804940000,
+//      "168387.3"
 //  ],
 //  [
 //      ...
@@ -305,18 +280,17 @@ impl Tickers {
 //  ...
 // ]
 #[derive(Deserialize, Debug)]
-pub struct Klines {
-    data: Vec<Kline>,
-}
+pub struct Klines(Vec<Kline>);
 
 #[derive(Deserialize, Debug)]
 struct Kline {
-    time: String,
+    timestamp: i64,
     opening: String,
     closing: String,
     high: String,
     low: String,
     volume: String,
+    _close_time: IgnoredAny,
     _turnover: IgnoredAny,
 }
 
@@ -332,12 +306,15 @@ impl<'de> Visitor<'de> for Kline {
         A: SeqAccess<'de>,
     {
         Ok(Kline {
-            time: seq.next_element()?.expect("String timestamp"),
+            timestamp: seq.next_element()?.expect("number timestamp"),
             opening: seq.next_element()?.expect("String opening"),
             closing: seq.next_element()?.expect("String closing"),
             high: seq.next_element()?.expect("String high"),
             low: seq.next_element()?.expect("String low"),
             volume: seq.next_element()?.expect("String volume"),
+            _close_time: seq
+                .next_element::<IgnoredAny>()?
+                .expect("number close_time"),
             _turnover: seq.next_element::<IgnoredAny>()?.expect("String turnover"),
         })
     }
@@ -359,7 +336,7 @@ impl Klines {
         let transaction = Arc::new(pg_client.transaction().await?);
 
         // iterate over the data stream and execute pg rows
-        let mut stream = stream::iter(self.data);
+        let mut stream = stream::iter(self.0);
         while let Some(cell) = stream.next().await {
             let query = query.clone();
             let transaction = transaction.clone();
@@ -371,10 +348,7 @@ impl Klines {
                         &query,
                         &[
                             &symbol_pk,
-                            &chrono::DateTime::from_timestamp(
-                                cell.time.parse::<i64>().expect("String -> i64 Time"),
-                                0,
-                            ),
+                            &chrono::DateTime::from_timestamp_millis(cell.timestamp),
                             &interval_pk,
                             &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
                             &cell.high.parse::<f64>().expect("String -> f64 Opening"),
@@ -388,9 +362,9 @@ impl Klines {
                     .await;
 
                 match result {
-                    Ok(_) => trace!("inserting KuCoin price data for {symbol}"),
+                    Ok(_) => trace!("inserting MEXC price data for {symbol}"),
                     Err(err) => {
-                        error!("failed to insert price data for {symbol} from KuCoin, error({err})")
+                        error!("failed to insert price data for {symbol} from MEXC, error({err})")
                     }
                 }
             }
@@ -403,12 +377,12 @@ impl Klines {
             .commit()
             .await
             .map_err(|err| {
-                error!("failed to commit transaction for {symbol} from KuCoin");
+                error!("failed to commit transaction for {symbol} from MEXC");
                 err
             })?;
 
         debug!(
-            "{symbol} price data collected from KuCoin, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "{symbol} price data collected from MEXC, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 

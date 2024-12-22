@@ -3,8 +3,8 @@ members = [ "crates/*" ]
 resolver = "2"
 
 [workspace.package]
-name = "junkyard"
 version = "0.1.0"
+readme = "README.md"
 
 [workspace.dependencies]
 anyhow = { version = "1" }
@@ -14,5 +14,5 @@ futures = { version = "0.3" }
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 tracing = { version = "0.1.41" }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }

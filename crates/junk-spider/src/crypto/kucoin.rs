@@ -134,7 +134,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to fetch KuCoin prices, error({err})");
+                            error!("failed to fetch KuCoin prices for {symbol}, error({err})");
                             return;
                         }
                     };

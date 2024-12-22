@@ -117,8 +117,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                         Ok(data) => data,
                         Err(err) => {
                             error!(
-                                "failed to fetch Binance prices for {}, error({err})",
-                                &ticker.symbol
+                                "failed to fetch Binance prices for {symbol}, error({err})",
                             );
                             return;
                         }
