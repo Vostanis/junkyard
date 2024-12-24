@@ -58,13 +58,16 @@ async fn main() -> anyhow::Result<()> {
             });
             debug!("findump connection established");
 
+            let time = std::time::Instant::now();
+
             // 2. match pre-built endpoints to scrape
-            // spider::crypto::binance::scrape(&mut pg_client).await?;
-            // spider::crypto::kucoin::scrape(&mut pg_client).await?;
-            // spider::crypto::mexc::scrape(&mut pg_client).await?;
+            spider::crypto::binance::scrape(&mut pg_client).await?;
+            spider::crypto::kucoin::scrape(&mut pg_client).await?;
+            spider::crypto::mexc::scrape(&mut pg_client).await?;
             spider::crypto::kraken::scrape(&mut pg_client).await?;
 
             // match subcommand somehow
+            debug!("cryptoo scraped: {:?}", time.elapsed());
         }
 
         // test env

@@ -309,7 +309,7 @@ struct ResultData {
     pairs: HashMap<String, Vec<Kline>>,
 
     #[allow(dead_code)]
-    #[serde(skip_deserializing)]
+    // #[serde(skip_deserializing)]
     last: u64,
 }
 
@@ -322,7 +322,7 @@ struct Kline {
     low: String,
     _vwap: IgnoredAny,
     volume: String,
-    trades: i32,
+    trades: i64,
 }
 
 impl<'de> Visitor<'de> for Kline {
@@ -384,10 +384,10 @@ impl Klines {
                                 ),
                                 &interval_pk,
                                 &cell.opening.parse::<f64>().expect("String -> f64 Opening"),
-                                &cell.high.parse::<f64>().expect("String -> f64 Opening"),
-                                &cell.low.parse::<f64>().expect("String -> f64 Opening"),
-                                &cell.closing.parse::<f64>().expect("String -> f64 Opening"),
-                                &cell.volume.parse::<f64>().expect("String -> f64 Opening"),
+                                &cell.high.parse::<f64>().expect("String -> f64 High"),
+                                &cell.low.parse::<f64>().expect("String -> f64 Low"),
+                                &cell.closing.parse::<f64>().expect("String -> f64 Closing"),
+                                &cell.volume.parse::<f64>().expect("String -> f64 volume"),
                                 &cell.trades,
                                 &source_pk,
                             ],
