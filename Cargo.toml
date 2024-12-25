@@ -3,17 +3,16 @@ members = [ "crates/*" ]
 resolver = "2"
 
 [workspace.package]
-name = "junkyard"
 version = "0.1.0"
+readme = "README.md"
 
 [workspace.dependencies]
 anyhow = { version = "1" }
+chrono = { version = "0.4" }
 dotenv = { version = "0.15" }
 futures = { version = "0.3" }
-serde = { version = "1" }
-serde_json = { version = "1" }
-sqlite = { version = "0.36" }
-thiserror = { version = "2" }
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
 tracing = { version = "0.1.41" }
-tokio = { version = "1", features = ["full"] }
-tokio-postgres = { version = "0.7" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }

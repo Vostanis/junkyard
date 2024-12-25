@@ -3,6 +3,12 @@ name = "junk"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+anyhow.workspace = true
+clap = { version = "4.5.23", features = ["derive"] }
+dotenv.workspace = true
+junk-spider = { version = "0.1.0", path = "../junk-spider" }
+tokio.workspace = true
+tokio-postgres = "0.7.12"
+tracing.workspace = true
+tracing-subscriber = "0.3.19"
