@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
+const BROKERAGE: &str = "Binance";
+
 // RATE_LIMIT = 1200 /60s
 //
 // tickers = `https://api.binance.com/api/v1/ticker/allBookTickers`
@@ -29,25 +31,25 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .send()
         .await
         .map_err(|err| {
-            error!("failed to fetch Binance tickers");
+            error!("failed to fetch {BROKERAGE} tickers, error({err})");
             err
         })?
         .json()
         .await
         .map_err(|err| {
-            error!("failed to dserialize Binance tickers");
+            error!("failed to deserialize {BROKERAGE} tickers, error({err})");
             err
         })?;
 
     // 1. insert binance source
     pg_client
         .query(
-            "INSERT INTO crypto.sources (source) VALUES ('Binance') ON CONFLICT DO NOTHING",
-            &[],
+            "INSERT INTO crypto.sources (source) VALUES ($1) ON CONFLICT DO NOTHING",
+            &[&BROKERAGE],
         )
         .await
         .map_err(|err| {
-            error!("failed to insert Binance as a source");
+            error!("failed to insert {BROKERAGE} as a source, error({err})");
             err
         })?;
 
@@ -87,11 +89,11 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         let source: String = row.get("source");
         source_pks.insert(source, pk);
     }
-    let source_pk = match source_pks.get("Binance") {
+    let source_pk = match source_pks.get(BROKERAGE) {
         Some(pk) => *pk,
         None => {
-            error!("failed to find Binance source pk");
-            return Err(anyhow::anyhow!("failed to find Binance source pk"));
+            error!("failed to find {BROKERAGE} source pk");
+            return Err(anyhow::anyhow!("failed to find {BROKERAGE} source pk"));
         }
     };
 
@@ -117,7 +119,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                         Ok(data) => data,
                         Err(err) => {
                             error!(
-                                "failed to fetch Binance prices for {symbol}, error({err})",
+                                "failed to fetch {BROKERAGE} prices for {symbol}, error({err})",
                             );
                             return;
                         }
@@ -127,7 +129,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     let klines: Klines = match response.json().await {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to parse Binance prices for {symbol}, error({err})");
+                            error!("failed to parse {BROKERAGE} prices for {symbol}, error({err})");
                             return;
                         }
                     };
@@ -161,7 +163,7 @@ fn build_client() -> HttpClient {
     let client = ClientBuilder::new()
         .default_headers(headers)
         .build()
-        .expect("Binance Client to build");
+        .expect("Binance client to build");
     client
 }
 
@@ -214,14 +216,14 @@ impl Tickers {
                     .execute(&query, &[&ticker.symbol])
                     .await
                     .map_err(|err| {
-                        error!("failed to insert symbol data for Binance");
+                        error!("failed to insert symbol data for {BROKERAGE}, error({err})");
                         err
                     });
 
                 match result {
-                    Ok(_) => trace!("inserting Binance symbol data for {}", &ticker.symbol),
+                    Ok(_) => trace!("inserting {BROKERAGE} symbol data for {}", &ticker.symbol),
                     Err(err) => error!(
-                        "failed to insert symbol data for {} from Binance, error({})",
+                        "failed to insert symbol data for {} from {BROKERAGE}, error({})",
                         &ticker.symbol, err
                     ),
                 };
@@ -234,13 +236,13 @@ impl Tickers {
             .expect("failed to unpack Transaction from Arc")
             .commit()
             .await
-            .map_err(|e| {
-                error!("failed to commit transaction for symbols from Binance");
-                e
+            .map_err(|err| {
+                error!("failed to commit transaction for symbols from {BROKERAGE}");
+                err
             })?;
 
         debug!(
-            "ticker data collected from Binance, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "ticker data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 
@@ -372,9 +374,11 @@ impl Klines {
                     .await;
 
                 match result {
-                    Ok(_) => trace!("inserting Binance price data for {symbol}"),
+                    Ok(_) => trace!("inserting {BROKERAGE} price data for {symbol}"),
                     Err(err) => {
-                        error!("failed to insert price data for {symbol} from Binance, err({err})")
+                        error!(
+                            "failed to insert price data for {symbol} from {BROKERAGE}, err({err})"
+                        )
                     }
                 }
             }
@@ -387,12 +391,12 @@ impl Klines {
             .commit()
             .await
             .map_err(|err| {
-                error!("failed to commit transaction for {symbol} from Binance, error({err})");
+                error!("failed to commit transaction for {symbol} from {BROKERAGE}, error({err})");
                 err
             })?;
 
         debug!(
-            "{symbol} price data collected from Binance, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "{symbol} price data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 

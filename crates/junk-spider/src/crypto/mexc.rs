@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
+const BROKERAGE: &'static str = "MEXC";
+
 // RATE_LIMIT = 500 /1s
 //
 // tickers = `https://api.mexc.com/api/v3/ticker/bookTicker`
@@ -29,25 +31,25 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .send()
         .await
         .map_err(|err| {
-            error!("failed to fetch MEXC tickers");
+            error!("failed to fetch {BROKERAGE} tickers, error({err})");
             err
         })?
         .json()
         .await
         .map_err(|err| {
-            error!("failed to dserialize MEXC tickers");
+            error!("failed to deserialize {BROKERAGE} tickers, error({err})");
             err
         })?;
 
-    // 1. insert kucoin source
+    // 1. insert source
     pg_client
         .query(
-            "INSERT INTO crypto.sources (source) VALUES ('MEXC') ON CONFLICT DO NOTHING",
-            &[],
+            "INSERT INTO crypto.sources (source) VALUES ($1) ON CONFLICT DO NOTHING",
+            &[&BROKERAGE],
         )
         .await
         .map_err(|err| {
-            error!("failed to insert MEXC as a source");
+            error!("failed to insert {BROKERAGE} as a source, error({err})");
             err
         })?;
 
@@ -87,11 +89,11 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         let source: String = row.get("source");
         source_pks.insert(source, pk);
     }
-    let source_pk = match source_pks.get("MEXC") {
+    let source_pk = match source_pks.get(BROKERAGE) {
         Some(pk) => *pk,
         None => {
-            error!("failed to find MEXC source pk");
-            return Err(anyhow::anyhow!("failed to find MEXC source pk"));
+            error!("failed to find {BROKERAGE} source pk");
+            return Err(anyhow::anyhow!("failed to find {BROKERAGE} source pk"));
         }
     };
 
@@ -117,7 +119,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     let response = match http_client.get(url).send().await {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to fetch MEXC prices for {symbol}, error({err})");
+                            error!("failed to fetch {BROKERAGE} prices for {symbol}, error({err})");
                             return;
                         }
                     };
@@ -125,7 +127,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     let klines: Klines = match response.json().await {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to deserialize MEXC prices for {symbol}, error({err})");
+                            error!("failed to deserialize {BROKERAGE} prices for {symbol}, error({err})");
                             return;
                         }
                     };
@@ -226,14 +228,14 @@ impl Tickers {
                     .execute(&query, &[&ticker.symbol])
                     .await
                     .map_err(|err| {
-                        error!("failed to insert symbol data for MEXC");
+                        error!("failed to insert symbol data for {BROKERAGE}, error({err})");
                         err
                     });
 
                 match result {
-                    Ok(_) => trace!("inserting MEXC symbol data for {}", &ticker.symbol),
+                    Ok(_) => trace!("inserting {BROKERAGE} symbol data for {}", &ticker.symbol),
                     Err(err) => error!(
-                        "failed to insert symbol data for {} from MEXC, error({})",
+                        "failed to insert symbol data for {} from {BROKERAGE}, error({})",
                         &ticker.symbol, err
                     ),
                 };
@@ -247,12 +249,12 @@ impl Tickers {
             .commit()
             .await
             .map_err(|err| {
-                error!("failed to commit transaction for symbols from MEXC");
+                error!("failed to commit transaction for symbols from {BROKERAGE}");
                 err
             })?;
 
         debug!(
-            "ticker data collected from MEXC, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "ticker data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 
@@ -362,9 +364,9 @@ impl Klines {
                     .await;
 
                 match result {
-                    Ok(_) => trace!("inserting MEXC price data for {symbol}"),
+                    Ok(_) => trace!("inserting {BROKERAGE} price data for {symbol}"),
                     Err(err) => {
-                        error!("failed to insert price data for {symbol} from MEXC, error({err})")
+                        error!("failed to insert price data for {symbol} from {BROKERAGE}, error({err})")
                     }
                 }
             }
@@ -377,12 +379,12 @@ impl Klines {
             .commit()
             .await
             .map_err(|err| {
-                error!("failed to commit transaction for {symbol} from MEXC");
+                error!("failed to commit transaction for {symbol} from {BROKERAGE}");
                 err
             })?;
 
         debug!(
-            "{symbol} price data collected from MEXC, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "{symbol} price data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 

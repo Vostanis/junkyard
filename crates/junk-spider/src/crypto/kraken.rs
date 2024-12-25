@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
-const BROKERAGE: &'static str = "Kraken";
+const BROKERAGE: &str = "Kraken";
 
 // RATE_LIMIT = 15 /1s
 //

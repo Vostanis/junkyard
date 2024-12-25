@@ -5,7 +5,7 @@ use clap::Parser;
 use cli::{Cli, TraceLevel};
 use dotenv::var;
 use tokio_postgres::{self as pg, NoTls};
-use tracing::{debug, error, subscriber, trace, Level};
+use tracing::{debug, error, info, subscriber, trace, Level};
 use tracing_subscriber::FmtSubscriber;
 
 // preproccess the trace level
@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
             });
             debug!("findump connection established");
 
+            // start the clock
             let time = std::time::Instant::now();
 
             // 2. match pre-built endpoints to scrape
@@ -66,8 +67,10 @@ async fn main() -> anyhow::Result<()> {
             spider::crypto::mexc::scrape(&mut pg_client).await?;
             spider::crypto::kraken::scrape(&mut pg_client).await?;
 
-            // match subcommand somehow
-            debug!("cryptoo scraped: {:?}", time.elapsed());
+            info!(
+                "crypto finishing scraping, time elapsed: {:?}",
+                time.elapsed()
+            );
         }
 
         // test env

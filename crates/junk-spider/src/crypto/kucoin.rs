@@ -13,6 +13,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
+const BROKERAGE: &str = "KuCoin";
+
 // RATE_LIMIT = 4000 /30s
 //
 // tickers = `https://api.kucoin.com/api/v1/market/allTickers`
@@ -34,25 +36,25 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .send()
         .await
         .map_err(|err| {
-            error!("failed to fetch KuCoin tickers");
+            error!("failed to fetch {BROKERAGE} tickers, error({err})");
             err
         })?
         .json()
         .await
         .map_err(|err| {
-            error!("failed to dserialize KuCoin tickers");
+            error!("failed to dserialize {BROKERAGE} tickers, error({err})");
             err
         })?;
 
     // 1. insert kucoin source
     pg_client
         .query(
-            "INSERT INTO crypto.sources (source) VALUES ('KuCoin') ON CONFLICT DO NOTHING",
-            &[],
+            "INSERT INTO crypto.sources (source) VALUES ($1) ON CONFLICT DO NOTHING",
+            &[&BROKERAGE],
         )
         .await
         .map_err(|err| {
-            error!("failed to insert KuCoin as a source");
+            error!("failed to insert {BROKERAGE} as a source, error({err})");
             err
         })?;
 
@@ -92,11 +94,11 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         let source: String = row.get("source");
         source_pks.insert(source, pk);
     }
-    let source_pk = match source_pks.get("KuCoin") {
+    let source_pk = match source_pks.get(BROKERAGE) {
         Some(pk) => *pk,
         None => {
-            error!("failed to find KuCoin source pk");
-            return Err(anyhow::anyhow!("failed to find KuCoin source pk"));
+            error!("failed to find {BROKERAGE} source pk");
+            return Err(anyhow::anyhow!("failed to find {BROKERAGE} source pk"));
         }
     };
 
@@ -134,7 +136,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     {
                         Ok(data) => data,
                         Err(err) => {
-                            error!("failed to fetch KuCoin prices for {symbol}, error({err})");
+                            error!("failed to fetch {BROKERAGE} prices for {symbol}, error({err})");
                             return;
                         }
                     };
@@ -143,7 +145,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                         Ok(data) => data,
                         Err(err) => {
                             error!(
-                                "failed to deserialize KuCoin prices for {symbol}, error({err})"
+                                "failed to deserialize {BROKERAGE} prices for {symbol}, error({err})"
                             );
                             return;
                         }
@@ -181,7 +183,7 @@ fn build_client() -> HttpClient {
     let client = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .build()
-        .expect("KuCoin Client to build");
+        .expect("KuCoin client to build");
     client
 }
 
@@ -280,14 +282,14 @@ impl KuCoinTickerResponse {
                     .execute(&query, &[&ticker.symbol.replace("-", "")])
                     .await
                     .map_err(|err| {
-                        error!("failed to insert symbol data for KuCoin");
+                        error!("failed to insert symbol data for {BROKERAGE}, error({err})");
                         err
                     });
 
                 match result {
-                    Ok(_) => trace!("inserting KuCoin symbol data for {}", &ticker.symbol),
+                    Ok(_) => trace!("inserting {BROKERAGE} symbol data for {}", &ticker.symbol),
                     Err(err) => error!(
-                        "failed to insert symbol data for {} from KuCoin, error({})",
+                        "failed to insert symbol data for {} from {BROKERAGE}, error({})",
                         &ticker.symbol, err
                     ),
                 };
@@ -300,13 +302,13 @@ impl KuCoinTickerResponse {
             .expect("failed to unpack Transaction from Arc")
             .commit()
             .await
-            .map_err(|e| {
-                error!("failed to commit transaction for symbols from KuCoin");
-                e
+            .map_err(|err| {
+                error!("failed to commit transaction for symbols from {BROKERAGE}, error({err})");
+                err
             })?;
 
         debug!(
-            "ticker data collected from KuCoin, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "ticker data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 
@@ -416,9 +418,9 @@ impl Klines {
                     .await;
 
                 match result {
-                    Ok(_) => trace!("inserting KuCoin price data for {symbol}"),
+                    Ok(_) => trace!("inserting {BROKERAGE} price data for {symbol}"),
                     Err(err) => {
-                        error!("failed to insert price data for {symbol} from KuCoin, error({err})")
+                        error!("failed to insert price data for {symbol} from {BROKERAGE}, error({err})")
                     }
                 }
             }
@@ -431,12 +433,12 @@ impl Klines {
             .commit()
             .await
             .map_err(|err| {
-                error!("failed to commit transaction for {symbol} from KuCoin");
+                error!("failed to commit transaction for {symbol} from {BROKERAGE}");
                 err
             })?;
 
         debug!(
-            "{symbol} price data collected from KuCoin, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
+            "{symbol} price data collected from {BROKERAGE}, \x1b[38;5;208melapsed time: {} ms\x1b[0m",
             time.elapsed().as_millis()
         );
 
