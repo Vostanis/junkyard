@@ -1,6 +1,6 @@
 pub mod crypto;
 // pub mod econ;
-// pub mod stock;
+pub mod stock;
 
 pub(crate) mod http {
     pub(crate) use dotenv::var;
