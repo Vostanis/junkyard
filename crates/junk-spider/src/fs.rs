@@ -48,7 +48,7 @@ pub async fn download_file(http_client: &HttpClient, url: &str, path: &str) -> a
         let client = client.clone();
         tasks.push(tokio::spawn(async move {
             let mut file = file.lock().await;
-            download_chunk(&client, &url, start, end, &mut file).await;
+            let _chunk = download_chunk(&client, &url, start, end, &mut file).await;
         }));
     }
 

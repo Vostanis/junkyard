@@ -1,8 +1,10 @@
+#![allow(dead_code)]
+
 //////////////////////////////////////////////////////////////////
 // tickers
 //////////////////////////////////////////////////////////////////
 pub(crate) static INSERT_TICKER: &'static str = "
-    INSERT INTO stock.tickers (pk, ticker, title, industry, nation)
+    INSERT INTO stock.tickers (pk, cik, ticker, title, industry, nation)
     VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT (pk) DO NOTHING
 ";

@@ -71,8 +71,8 @@ pub async fn scrape() -> anyhow::Result<()> {
     );
 
     debug!("deleting metrics.zip and submissions.zip");
-    tokio::fs::remove_dir("./buffer/metrics.zip").await?;
-    tokio::fs::remove_dir("./buffer/submissions.zip").await?;
+    tokio::fs::remove_file("./buffer/metrics.zip").await?;
+    tokio::fs::remove_file("./buffer/submissions.zip").await?;
 
     Ok(())
 }
