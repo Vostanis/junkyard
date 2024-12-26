@@ -56,6 +56,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_source ON crypto.sources(source);
 
 CREATE TABLE IF NOT EXISTS stock.tickers (
 	pk SERIAL PRIMARY KEY,
+	cik CHAR(10),
 	symbol VARCHAR NOT NULL,
 	industry VARCHAR,
 	nation CHAR(4) NOT NULL,

@@ -1,10 +1,6 @@
 use crate::fs::{download_file, unzip};
 use crate::http::*;
-use std::sync::Arc;
-use tokio::fs::File;
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::Mutex;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 
 // 1. check if downloads are necessary
 // 2. download if necessary
@@ -19,13 +15,13 @@ const SUBMISSIONS_URL: &'static str =
     "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip";
 
 /// Scrape the SEC website for the latest company metrics and filings metadata.
-async fn scrape() -> anyhow::Result<()> {
+pub async fn scrape() -> anyhow::Result<()> {
     let http_client = build_client();
 
     info!("downloading companyfacts.zip and submissions.zip ...");
 
     // download companyfacts.zip (the metrics)
-    debug!("downloading metrics.zip ...");
+    debug!("downloading metrics.zip");
     download_file(&http_client, METRICS_URL, "./buffer/metrics.zip")
         .await
         .map_err(|err| {
@@ -35,8 +31,8 @@ async fn scrape() -> anyhow::Result<()> {
     debug!("metrics.zip downloaded to {}", "./buffer/metrics.zip");
 
     // download submissions.zip (the filings metadata)
-    debug!("downloading submissions.zip ...");
-    download_file(&http_client, SUBMISSIONS_URL, "./buffer/metrics.zip")
+    debug!("downloading submissions.zip");
+    download_file(&http_client, SUBMISSIONS_URL, "./buffer/submissions.zip")
         .await
         .map_err(|err| {
             error!("failed to download submissions.zip: {:?}", err);
@@ -48,6 +44,35 @@ async fn scrape() -> anyhow::Result<()> {
     );
 
     // unzip the files, using an async stream
+    info!("unzipping metrics.zip and submissions.zip ...");
+
+    debug!("unzipping metrics.zip");
+    unzip("./buffer/metrics.zip", "./buffer/metrics")
+        .await
+        .map_err(|err| {
+            error!("failed to unzip metrics.zip: {:?}", err);
+            err
+        })?;
+    debug!(
+        "metrics.zip unzipped successfully to {}",
+        "./buffer/metrics"
+    );
+
+    debug!("unzipping submissions.zip");
+    unzip("./buffer/submissions.zip", "./buffer/submissions")
+        .await
+        .map_err(|err| {
+            error!("failed to unzip submissions.zip: {:?}", err);
+            err
+        })?;
+    debug!(
+        "submissions.zip unzipped successfully to {}",
+        "./buffer/submissions"
+    );
+
+    debug!("deleting metrics.zip and submissions.zip");
+    tokio::fs::remove_dir("./buffer/metrics.zip").await?;
+    tokio::fs::remove_dir("./buffer/submissions.zip").await?;
 
     Ok(())
 }

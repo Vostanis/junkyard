@@ -61,11 +61,21 @@ async fn main() -> anyhow::Result<()> {
             // start the clock
             let time = std::time::Instant::now();
 
-            // 2. match pre-built endpoints to scrape
-            spider::crypto::binance::scrape(&mut pg_client).await?;
-            spider::crypto::kucoin::scrape(&mut pg_client).await?;
-            spider::crypto::mexc::scrape(&mut pg_client).await?;
-            spider::crypto::kraken::scrape(&mut pg_client).await?;
+            // // 2. download crypto
+            // spider::crypto::binance::scrape(&mut pg_client).await?;
+            // spider::crypto::kucoin::scrape(&mut pg_client).await?;
+            // spider::crypto::mexc::scrape(&mut pg_client).await?;
+            // spider::crypto::kraken::scrape(&mut pg_client).await?;
+
+            info!(
+                "crypto finishing scraping, time elapsed: {:?}",
+                time.elapsed()
+            );
+
+            // 3. download stocks
+            //    a) download bulks
+            // spider::stock::sec::bulks::scrape().await?;
+            spider::stock::sec::tickers::scrape(&mut pg_client).await?;
 
             info!(
                 "crypto finishing scraping, time elapsed: {:?}",

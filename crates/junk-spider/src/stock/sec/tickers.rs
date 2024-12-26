@@ -1,5 +1,7 @@
-use crate::http::*;
+#![allow(dead_code)]
+
 use crate::stock::common::de_cik;
+use crate::{http::*, stock::sql};
 use futures::{stream, StreamExt};
 use serde::de::Visitor;
 use serde::Deserialize;
@@ -9,13 +11,26 @@ use tracing::{debug, error, trace};
 // scrape
 // ----------------------------------------------------------------------------
 
-async fn scrape() -> anyhow::Result<()> {
+pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     let client = build_client();
-    let response = client
+
+    debug!("fetching SEC Company Tickers");
+    let tickers: Tickers = client
         .get("https://www.sec.gov/files/company_tickers.json")
         .send()
-        .await?;
-    let body = response.json().await?;
+        .await
+        .map_err(|err| {
+            error!("failed to fetch data, error({err})");
+            err
+        })?
+        .json()
+        .await
+        .map_err(|err| {
+            error!("failed to parse JSON, error({err})");
+            err
+        })?;
+    tickers.insert(pg_client).await?;
+
     Ok(())
 }
 
@@ -78,26 +93,23 @@ impl<'de> Deserialize<'de> for Tickers {
     }
 }
 
-// pg
-// ----------------------------------------------------------------------------
-
 impl Tickers {
-    async fn insert(pg_client: &mut PgClient) -> anyhow::Result<()> {
+    async fn insert(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
         let time = std::time::Instant::now();
 
         // preprocess pg query as transaction
-        let query = pg_client.prepare(&INDEX_QUERY).await?;
+        let query = pg_client.prepare(&sql::INSERT_TICKER).await?;
         let transaction = Arc::new(pg_client.transaction().await?);
 
         // iterate over the data stream and execute pg rows
-        let mut stream = stream::iter(data.0);
+        let mut stream = stream::iter(&self.0);
         while let Some(cell) = stream.next().await {
-            let path = format!("./buffer/submissions/CIK{}.json", cell.stock_id);
+            let path = format!("./buffer/submissions/CIK{}.json", cell.cik);
             trace!("reading file at path: \"{path}\"");
-            let file: Sic = match read_json(&path).await {
+            let file: Sic = match crate::fs::read_json(&path).await {
                 Ok(data) => data,
-                Err(e) => {
-                    error!("failed to read file | {e}");
+                Err(err) => {
+                    error!("failed to read file, error({err})");
                     continue;
                 }
             };
@@ -109,17 +121,17 @@ impl Tickers {
                     .execute(
                         &query,
                         &[
-                            &cell.stock_id,
+                            &cell.cik,
                             &cell.ticker,
-                            &cell.title,
+                            &cell.title.to_uppercase(),
                             &file.sic_description,
                             &"US",
                         ],
                     )
                     .await
                 {
-                    Ok(_) => trace!("Stock index inserted"),
-                    Err(err) => error!("Failed to insert SEC Company Tickers | ERROR: {err}"),
+                    Ok(_) => trace!("stock tickers inserted"),
+                    Err(err) => error!("failed to insert SEC Company Tickers, error({err})"),
                 }
             }
             .await;
@@ -130,16 +142,23 @@ impl Tickers {
             .expect("failed to unpack Transaction from Arc")
             .commit()
             .await
-            .map_err(|e| {
+            .map_err(|err| {
                 error!("failed to commit transaction for SEC Company Tickers");
-                e
+                err
             })?;
 
         debug!(
-            "Binance priceset inserted. Elapsed time: {} ms",
+            "SEC stock tickers inserted. Elapsed time: {} ms",
             time.elapsed().as_millis()
         );
 
         Ok(())
     }
+}
+
+// Struct for the SIC code retrived from submission files.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Sic {
+    sic_description: String,
 }
