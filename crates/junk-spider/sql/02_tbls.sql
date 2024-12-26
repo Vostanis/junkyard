@@ -56,5 +56,56 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_source ON crypto.sources(source);
 -- STOCK
 --------------------------------------------------------------------------------------
 
--- CREATE TABLE IF NOT EXISTS stock.prices;
--- CREATE TABLE IF NOT EXISTS stock.metrics;
+CREATE TABLE IF NOT EXISTS stock.tickers (
+	pk SERIAL PRIMARY KEY,
+	symbol VARCHAR NOT NULL,
+	industry VARCHAR,
+	nation CHAR(4) NOT NULL,
+	INDEX idx_symbol (symbol),
+	INDEX idx_nation (nation)
+);
+
+CREATE TABLE IF NOT EXISTS stock.prices (
+	symbol_pk INT,
+	interval_pk SMALLINT,
+	dated DATE NOT NULL,
+	opening FLOAT,
+	high FLOAT,
+	low FLOAT,
+	closing FLOAT,
+	volume BIGINT,
+	PRIMARY KEY (symbol_pk, interval_pk, dated),
+	INDEX idx_symbol_pk (symbol_pk),
+	INDEX idx_interval_pk (interval_pk),
+	INDEX idx_dated (dated)
+)
+PARTITION BY HASH(symbol_pk);
+
+CREATE TABLE IF NOT EXISTS stock.metrics (
+	symbol_pk INT NOT NULL,
+	metric_pk INT NOT NULL,
+	acc_pk INT NOT NULL,
+	dated DATE NOT NULL,
+	val FLOAT NOT NULL,
+	PRIMARY KEY (symbol_pk, metric_pk, dated, val),
+	INDEX idx_symbol_pk (symbol_pk),
+	INDEX idx_metric_pk (metric_pk),
+	INDEX idx_dated (dated)
+)
+PARTITION BY HASH(symbol_pk);
+
+-- Metrics Library (e.g., pk: 1 -> name: "Revenues")
+CREATE TABLE IF NOT EXISTS stock.metrics_lib (
+	pk SERIAL PRIMARY KEY,
+	metric VARCHAR NOT NULL,
+	INDEX idx_metric (metric)
+);
+
+-- Accounting Standards (e.g., pk: 1 -> "US-GAAP")
+CREATE TABLE IF NOT EXISTS stock.acc_stds (
+	pk SERIAL PRIMARY KEY,
+	symbol VARCHAR,
+	INDEX idx_symbol (symbol)
+);
+
+-- CREATE TABLE IF NOT EXISTS stock.filings;
