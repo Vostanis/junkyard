@@ -24,10 +24,8 @@ WHERE NOT EXISTS (
 -- crypto pairs
 CREATE TABLE IF NOT EXISTS crypto.symbols (
 	pk SERIAL PRIMARY KEY,
-	symbol VARCHAR NOT NULL
+	symbol VARCHAR NOT NULL,
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_symbol ON crypto.symbols(symbol);
 
 -- price data, including number of trades
 CREATE TABLE IF NOT EXISTS crypto.prices (
