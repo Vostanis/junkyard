@@ -22,6 +22,22 @@ pub mod stock;
 ///
 //////////////////////////////////////////////////////////////////////
 
+/// Colored logging function.
+pub(crate) fn time_elapsed(time: std::time::Instant) -> String {
+    use colored::Colorize;
+    format!("< Time elapsed: {} ms >", time.elapsed().as_millis())
+        .truecolor(224, 60, 138)
+        .to_string()
+}
+
+/// Standard client build for HTTP requests, only requiring a User-Agent Environrment Variable.
+pub(crate) fn std_client_build() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(&dotenv::var("USER_AGENT").expect("failed to read USER_AGENT"))
+        .build()
+        .expect("failed to build reqwest::Client")
+}
+
 /// Shortcuts used in HTTP API requests.
 pub mod http {
     pub use dotenv::var;

@@ -13,9 +13,9 @@ pub(crate) static INSERT_TICKER: &'static str = "
 // prices
 //////////////////////////////////////////////////////////////////
 pub(crate) static INSERT_PRICE: &'static str = "
-    INSERT INTO stock.prices (stock_pk, time, interval_pk, opening, high, low, closing, adj_close, volume)
+    INSERT INTO stock.prices (symbol_pk, dt, interval_pk, opening, high, low, closing, adj_close, volume)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    ON CONFLICT (stock_id, time, interval) DO NOTHING
+    ON CONFLICT (symbol_pk, dt, interval_pk) DO NOTHING
 ";
 
 //////////////////////////////////////////////////////////////////

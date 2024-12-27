@@ -147,10 +147,7 @@ impl Tickers {
                 err
             })?;
 
-        debug!(
-            "SEC stock tickers inserted. Elapsed time: {} ms",
-            time.elapsed().as_millis()
-        );
+        debug!("SEC stock tickers inserted. {}", crate::time_elapsed(time));
 
         Ok(())
     }

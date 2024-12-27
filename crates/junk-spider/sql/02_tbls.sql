@@ -30,7 +30,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_symbol ON crypto.symbols(symbol);
 -- price data, including number of trades
 CREATE TABLE IF NOT EXISTS crypto.prices (
 	symbol_pk INT,
-	time TIMESTAMP WITH TIME ZONE NOT NULL,
+	dt TIMESTAMP WITH TIME ZONE NOT NULL,
 	interval_pk SMALLINT,
 	opening FLOAT,
 	high FLOAT,
@@ -39,12 +39,11 @@ CREATE TABLE IF NOT EXISTS crypto.prices (
 	volume FLOAT,
 	trades BIGINT,
 	source_pk SMALLINT,
-	PRIMARY KEY (symbol_pk, time, interval_pk, source_pk)
-)
-PARTITION BY HASH(symbol_pk);
+	PRIMARY KEY (symbol_pk, dt, interval_pk, source_pk)
+);
 CREATE INDEX IF NOT EXISTS idx_symbol_pk ON crypto.prices(symbol_pk);
 CREATE INDEX IF NOT EXISTS idx_interval_pk ON crypto.prices(interval_pk);
-CREATE INDEX IF NOT EXISTS idx_time ON crypto.prices(time);
+CREATE INDEX IF NOT EXISTS idx_dt ON crypto.prices(dt);
 
 -- which broker the data came from, e.g. binance, kucoin, mexc
 CREATE TABLE IF NOT EXISTS crypto.sources (
@@ -73,18 +72,18 @@ CREATE INDEX IF NOT EXISTS idx_nation ON stock.tickers(nation);
 CREATE TABLE IF NOT EXISTS stock.prices (
 	symbol_pk INT,
 	interval_pk SMALLINT,
-	dated DATE NOT NULL,
+	dt TIMESTAMP WITH TIME ZONE NOT NULL,
 	opening FLOAT,
 	high FLOAT,
 	low FLOAT,
 	closing FLOAT,
+	adj_close FLOAT,
 	volume BIGINT,
-	PRIMARY KEY (symbol_pk, interval_pk, dated)
-)
-PARTITION BY HASH(symbol_pk);
+	PRIMARY KEY (symbol_pk, interval_pk, dt)
+);
 CREATE INDEX IF NOT EXISTS idx_symbol_pk ON stock.prices(symbol_pk);
 CREATE INDEX IF NOT EXISTS idx_interval_pk ON stock.prices(interval_pk);
-CREATE INDEX IF NOT EXISTS idx_dated ON stock.prices(dated);
+CREATE INDEX IF NOT EXISTS idx_dt ON stock.prices(dt);
 
 -- metrics value table
 CREATE TABLE IF NOT EXISTS stock.metrics (
@@ -94,8 +93,7 @@ CREATE TABLE IF NOT EXISTS stock.metrics (
 	dated DATE NOT NULL,
 	val FLOAT NOT NULL,
 	PRIMARY KEY (symbol_pk, metric_pk, dated, val)
-)
-PARTITION BY HASH(symbol_pk);
+);
 CREATE INDEX IF NOT EXISTS idx_symbol_pk ON stock.metrics(symbol_pk);
 CREATE INDEX IF NOT EXISTS idx_dated ON stock.metrics(dated);
 

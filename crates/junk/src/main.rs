@@ -75,7 +75,8 @@ async fn main() -> anyhow::Result<()> {
             // 3. download stocks
             //    a) download bulks
             // spider::stock::sec::bulks::scrape().await?;
-            spider::stock::sec::tickers::scrape(&mut pg_client).await?;
+            // spider::stock::sec::tickers::scrape(&mut pg_client).await?;
+            spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
 
             info!(
                 "crypto finishing scraping, time elapsed: {:?}",
