@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS stock.metrics (
 	acc_pk INT NOT NULL,
 	dated DATE NOT NULL,
 	val FLOAT NOT NULL,
-	PRIMARY KEY (symbol_pk, metric_pk, dated, val)
+	PRIMARY KEY (symbol_pk, metric_pk, acc_pk, dated, val)
 );
 CREATE INDEX IF NOT EXISTS idx_symbol_pk ON stock.metrics(symbol_pk);
 CREATE INDEX IF NOT EXISTS idx_dated ON stock.metrics(dated);

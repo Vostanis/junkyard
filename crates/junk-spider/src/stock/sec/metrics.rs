@@ -35,6 +35,11 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     let stream = stream::iter(tickers);
     stream
         .for_each_concurrent(12, |ticker| {
+            let time = std::time::Instant::now();
+
+            // create 3 clones of the pg_client for the 3 processes
+            let pk_insert_pg_client = pg_client.clone();
+            let pk_get_pg_client = pg_client.clone();
             let pg_client = pg_client.clone();
             async move {
                 // construct the path
@@ -67,8 +72,17 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                             // if valid, parse the dataset
                             for (metric_name, dataset) in metric {
                                 // insert the metric name
-                                match pg_client.lock().await.query(sql::INSERT_METRIC_PK, &[&metric_name]).await {
-                                    Ok(_) => (),
+                                match pk_insert_pg_client
+                                    .lock()
+                                    .await
+                                    .query(sql::INSERT_METRIC_PK, &[&metric_name])
+                                    .await
+                                {
+                                    Ok(_) => trace!(
+                                        "inserted metric {metric_name} from [{}], {}",
+                                        &ticker.ticker,
+                                        &ticker.title
+                                    ),
                                     Err(err) => {
                                         error!(
                                             "failed to insert metric into metrics_lib, error({err})"
@@ -78,7 +92,12 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                                 };
 
                                 // return the pk for the metric name
-                                let metric_pk = match pg_client.lock().await.query(sql::GET_METRIC_PK, &[&metric_name]).await {
+                                let metric_pk = match pk_get_pg_client
+                                    .lock()
+                                    .await
+                                    .query(sql::GET_METRIC_PK, &[&metric_name])
+                                    .await
+                                {
                                     Ok(rows) => rows[0].get(0),
                                     Err(err) => {
                                         error!(
@@ -90,32 +109,71 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
 
                                 // insert into stock.metrics
                                 // let inner_stream = stream::iter(dataset.units);
+                                let mut pg_client = pg_client.lock().await;
+                                let query = pg_client
+                                    .prepare(sql::INSERT_METRIC)
+                                    .await
+                                    .expect("failed to prepare INSERT_METRIC statement");
+
+                                let transaction = match pg_client.transaction().await {
+                                    Ok(tr) => Arc::new(tr),
+                                    Err(err) => {
+                                        error!("failed to create transaction for [{}] {}, error({err})", &ticker.ticker, &ticker.title);
+                                        return;
+                                    }
+                                };
+
                                 for (_units, values) in dataset.units {
                                     stream::iter(values)
                                         .for_each(|cell| {
-                                            let pg_client = pg_client.clone();
+                                            let query = query.clone();
+                                            let transaction = transaction.clone();
+                                            let title = &ticker.title;
+                                            let pk = &ticker.pk;
+                                            let ticker = &ticker.ticker;
                                             async move {
                                                 let metric = Metric {
-                                                    symbol_pk: ticker.pk,
-                                                    metric_pk: metric_pk,
+                                                    symbol_pk: *pk,
+                                                    metric_pk,
                                                     acc_pk: *acc_pk,
                                                     dated: convert_date_type(&cell.dated)
                                                         .expect("failed to convert date type"),
                                                     val: cell.val,
                                                 };
 
-                                                let mut pg_client = pg_client.lock().await;
-                                                match metric.insert(&mut pg_client).await {
-                                                    Ok(_) => (),
+                                                match transaction
+                                                    .execute(
+                                                        &query,
+                                                        &[
+                                                            &metric.symbol_pk,
+                                                            &metric.metric_pk,
+                                                            &metric.acc_pk,
+                                                            &metric.dated,
+                                                            &metric.val,
+                                                        ],
+                                                    )
+                                                    .await {
+                                                    Ok(_) =>(),
                                                     Err(err) => {
-                                                        error!("failed to insert row {:?}, error({err})", metric);
+                                                        error!("failed to execute INSERT_METRIC transaction for [{}] {}, error({err})",
+                                                            ticker, title);
                                                         return;
                                                     }
-                                                }
+                                                };
+
                                             }
                                         })
                                         .await;
+
                                 }
+
+                                Arc::into_inner(transaction)
+                                    .expect("...")
+                                    .commit()
+                                    .await.expect("failed to commit transaction");
+                                trace!("metric data inserted for [{}] {}, {}",
+                                    &ticker.ticker, &ticker.title, crate::time_elapsed(time)
+                                );
                             }
                         }
                         None => {
@@ -123,6 +181,9 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                         }
                     };
                 }
+                debug!("metric data inserted for [{}] {}, {}",
+                    &ticker.ticker, &ticker.title, crate::time_elapsed(time)
+                );
             }
         })
         .await;
@@ -151,8 +212,8 @@ struct Ticker {
 //      },
 //      ...
 // ]
-#[derive(Debug)]
-struct Metrics(Vec<Metric>);
+// #[derive(Debug)]
+// struct Metrics(Vec<Metric>);
 
 #[derive(Debug)]
 struct Metric {
@@ -161,12 +222,6 @@ struct Metric {
     acc_pk: i32,
     dated: chrono::NaiveDate,
     val: f64,
-}
-
-impl Metric {
-    async fn insert(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
-        Ok(())
-    }
 }
 
 // =====

@@ -17,7 +17,7 @@ fn preprocess(trace_level: Level) {
     subscriber::set_global_default(my_subscriber).expect("Set subscriber");
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 24)]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -76,7 +76,8 @@ async fn main() -> anyhow::Result<()> {
             //    a) download bulks
             // spider::stock::sec::bulks::scrape().await?;
             // spider::stock::sec::tickers::scrape(&mut pg_client).await?;
-            spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
+            spider::stock::sec::metrics::scrape(&mut pg_client).await?;
+            // spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
 
             info!(
                 "crypto finishing scraping, time elapsed: {:?}",

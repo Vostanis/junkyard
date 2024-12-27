@@ -34,7 +34,7 @@ pub(crate) static INSERT_PRICE: &'static str = "
 pub(crate) static INSERT_METRIC: &'static str = "
     INSERT INTO stock.metrics (symbol_pk, metric_pk, acc_pk, dated, val)
     VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (stock_id, dated, metric, val, unit, taxonomy) DO NOTHING
+    ON CONFLICT (symbol_pk, metric_pk, acc_pk, dated, val) DO NOTHING
 ";
 
 /// When a new metric is found (when scraping the SEC's compfanyfacts.zip), insert it into
@@ -42,12 +42,12 @@ pub(crate) static INSERT_METRIC: &'static str = "
 pub(crate) static INSERT_METRIC_PK: &'static str = "
     INSERT INTO stock.metrics_lib (metric)
     VALUES ($1)
-    ON CONFILCT (pk) DO NOTHING
+    ON CONFLICT (metric) DO NOTHING
 ";
 
 pub(crate) static GET_METRIC_PK: &'static str = "
     SELECT pk 
-    FROM stock.metrics 
+    FROM stock.metrics_lib
     WHERE metric = ($1)
 ";
 
