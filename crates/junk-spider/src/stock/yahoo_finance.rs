@@ -34,12 +34,12 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     let http_client = crate::std_client_build();
     let stream = stream::iter(tickers);
     stream
-        .for_each_concurrent(18, |ticker| {
+        .for_each_concurrent(12, |ticker| {
             let http_client = &http_client;
             let pg_client = pg_client.clone();
             async move {
                 let url = format!(
-                "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=10y&interval=1d",
+                "https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?range=10y&interval=1d",
                 ticker = ticker.ticker
             );
 
