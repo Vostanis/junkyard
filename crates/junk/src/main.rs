@@ -17,7 +17,7 @@ fn preprocess(trace_level: Level) {
     subscriber::set_global_default(my_subscriber).expect("Set subscriber");
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 24)]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     // read cli inputs
     use cli::Commands::*;
     match cli.command {
-        // scrape endpoints
+        // `junk spider <subarg>`: scrape endpoints
         Spider => {
             use junk_spider as spider;
 
@@ -61,11 +61,26 @@ async fn main() -> anyhow::Result<()> {
             // start the clock
             let time = std::time::Instant::now();
 
-            // 2. match pre-built endpoints to scrape
-            spider::crypto::binance::scrape(&mut pg_client).await?;
-            spider::crypto::kucoin::scrape(&mut pg_client).await?;
-            spider::crypto::mexc::scrape(&mut pg_client).await?;
-            spider::crypto::kraken::scrape(&mut pg_client).await?;
+            // // 2. download crypto
+            // spider::crypto::binance::scrape(&mut pg_client).await?;
+            // spider::crypto::kucoin::scrape(&mut pg_client).await?;
+            // spider::crypto::mexc::scrape(&mut pg_client).await?;
+            // spider::crypto::kraken::scrape(&mut pg_client).await?;
+            //
+            // info!(
+            //     "crypto finishing scraping, time elapsed: {:?}",
+            //     time.elapsed()
+            // );
+
+            // 3. download stocks
+            //    a) download bulks
+            // spider::stock::sec::bulks::scrape().await?;
+            // spider::stock::sec::tickers::scrape(&mut pg_client).await?;
+            // spider::stock::sec::metrics::scrape(&mut pg_client).await?;
+            // spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
+
+            // 4. download economic data
+            spider::econ::fred::scrape(&mut pg_client).await?;
 
             info!(
                 "crypto finishing scraping, time elapsed: {:?}",
