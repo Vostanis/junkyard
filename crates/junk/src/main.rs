@@ -66,11 +66,11 @@ async fn main() -> anyhow::Result<()> {
             // spider::crypto::kucoin::scrape(&mut pg_client).await?;
             // spider::crypto::mexc::scrape(&mut pg_client).await?;
             // spider::crypto::kraken::scrape(&mut pg_client).await?;
-
-            info!(
-                "crypto finishing scraping, time elapsed: {:?}",
-                time.elapsed()
-            );
+            //
+            // info!(
+            //     "crypto finishing scraping, time elapsed: {:?}",
+            //     time.elapsed()
+            // );
 
             // 3. download stocks
             //    a) download bulks

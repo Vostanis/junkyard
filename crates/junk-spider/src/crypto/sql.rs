@@ -21,7 +21,7 @@ lazy_static::lazy_static! {
 pub(crate) const INSERT_PRICE: &'static str = "
     INSERT INTO crypto.prices (
         symbol_pk, 
-        time, 
+        dt, 
         interval_pk, 
         opening, 
         high, 
@@ -32,7 +32,7 @@ pub(crate) const INSERT_PRICE: &'static str = "
         source_pk
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    ON CONFLICT (symbol_pk, time, interval_pk, source_pk)
+    ON CONFLICT (symbol_pk, dt, interval_pk, source_pk)
     DO NOTHING
 ";
 

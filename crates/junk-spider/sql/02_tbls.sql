@@ -118,7 +118,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting ON stock.acc_stds(accounting);
 --------------------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS econ.fred (
-	dated DATED,
+	dated DATE,
 	metric VARCHAR,
 	val FLOAT,
 	PRIMARY KEY (dated, metric, val)

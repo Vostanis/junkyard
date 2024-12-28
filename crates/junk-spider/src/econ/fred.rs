@@ -10,23 +10,17 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     let http_client = crate::std_client_build();
 
     for dataset in ["Unemployment Rate", "Interest Rate"] {
-        let key = &var("FRED_API")?;
+        let key = &var("FRED_API").expect("environment variable FRED_API");
         let url = match dataset {
-                "unemployment rate" => 
+                "Unemployment Rate" => 
                     format!("https://api.stlouisfed.org/fred/series/observations?series_id=DFF&api_key={key}&file_type=json"),
-                "interest rate" => 
+                "Interest Rate" => 
                     format!("https://api.stlouisfed.org/fred/series/observations?series_id=UNRATE&api_key={key}&file_type=json"),
-                _ => unreachable!("unreachable dataset in Fred etl")
+                _ => panic!("unexpected FRED dataset"),
             };
 
         trace!("fetching Fred data {dataset}");
-        let data: Observations = http_client
-            .get(url)
-            .header("user-agent", &var("user_agent")?)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let data: Observations = http_client.get(url).send().await?.json().await?;
         trace!("inserting Fred data {dataset}");
         data.insert(pg_client, &dataset).await?;
     }
