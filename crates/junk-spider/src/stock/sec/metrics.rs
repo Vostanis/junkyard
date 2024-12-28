@@ -64,6 +64,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     &ticker.ticker,
                     &ticker.title
                 );
+                let mut metrics: Vec<Metric> = vec![];
                 for (dataset_id, metric) in json.facts {
                     // match the dataset_id to any valid datasets included in the static ACC_STDS
                     // map
@@ -101,79 +102,24 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                                     Ok(rows) => rows[0].get(0),
                                     Err(err) => {
                                         error!(
-                                            "failed to insert metric into metrics_lib, error({err})"
+                                            "failed to get metric_pk from metrics_lib, error({err})"
                                         );
                                         return;
                                     }
                                 };
 
-                                // insert into stock.metrics
-                                // let inner_stream = stream::iter(dataset.units);
-                                let mut pg_client = pg_client.lock().await;
-                                let query = pg_client
-                                    .prepare(sql::INSERT_METRIC)
-                                    .await
-                                    .expect("failed to prepare INSERT_METRIC statement");
-
-                                let transaction = match pg_client.transaction().await {
-                                    Ok(tr) => Arc::new(tr),
-                                    Err(err) => {
-                                        error!("failed to create transaction for [{}] {}, error({err})", &ticker.ticker, &ticker.title);
-                                        return;
-                                    }
-                                };
-
                                 for (_units, values) in dataset.units {
-                                    stream::iter(values)
-                                        .for_each(|cell| {
-                                            let query = query.clone();
-                                            let transaction = transaction.clone();
-                                            let title = &ticker.title;
-                                            let pk = &ticker.pk;
-                                            let ticker = &ticker.ticker;
-                                            async move {
-                                                let metric = Metric {
-                                                    symbol_pk: *pk,
-                                                    metric_pk,
-                                                    acc_pk: *acc_pk,
-                                                    dated: convert_date_type(&cell.dated)
-                                                        .expect("failed to convert date type"),
-                                                    val: cell.val,
-                                                };
-
-                                                match transaction
-                                                    .execute(
-                                                        &query,
-                                                        &[
-                                                            &metric.symbol_pk,
-                                                            &metric.metric_pk,
-                                                            &metric.acc_pk,
-                                                            &metric.dated,
-                                                            &metric.val,
-                                                        ],
-                                                    )
-                                                    .await {
-                                                    Ok(_) =>(),
-                                                    Err(err) => {
-                                                        error!("failed to execute INSERT_METRIC transaction for [{}] {}, error({err})",
-                                                            ticker, title);
-                                                        return;
-                                                    }
-                                                };
-
-                                            }
-                                        })
-                                        .await;
-
+                                    for cell in values {
+                                        metrics.push(Metric {
+                                            symbol_pk: ticker.pk,
+                                            metric_pk,
+                                            acc_pk: *acc_pk,
+                                            dated: convert_date_type(&cell.dated)
+                                                .expect("failed to convert date type"),
+                                            val: cell.val,
+                                        });
+                                    }
                                 }
-
-                                Arc::into_inner(transaction)
-                                    .expect("...")
-                                    .commit()
-                                    .await.expect("failed to commit transaction");
-                                trace!("metric data inserted for [{}] {}, {}",
-                                    &ticker.ticker, &ticker.title, crate::time_elapsed(time)
-                                );
                             }
                         }
                         None => {
@@ -181,12 +127,78 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                         }
                     };
                 }
-                debug!("metric data inserted for [{}] {}, {}",
-                    &ticker.ticker, &ticker.title, crate::time_elapsed(time)
+
+                // insert into stock.metrics
+                let mut pg_client = pg_client.lock().await;
+                let query = pg_client
+                    .prepare(sql::INSERT_METRIC)
+                    .await
+                    .expect("failed to prepare INSERT_METRIC statement");
+
+                let transaction = match pg_client.transaction().await {
+                    Ok(tr) => Arc::new(tr),
+                    Err(err) => {
+                        error!(
+                            "failed to create transaction for [{}] {}, error({err})",
+                            &ticker.ticker, &ticker.title
+                        );
+                        return;
+                    }
+                };
+
+                // stream the data to transaction
+                info!(
+                    "inserting reformatted metric data for [{}] {}",
+                    &ticker.ticker, &ticker.title
+                );
+                let mut stream = stream::iter(metrics);
+                while let Some(metric) = stream.next().await {
+                    let query = query.clone();
+                    let transaction = transaction.clone();
+                    let tkr = &ticker.ticker;
+                    let title = &ticker.title;
+                    async move {
+                        match transaction
+                            .execute(
+                                &query,
+                                &[
+                                    &metric.symbol_pk,
+                                    &metric.metric_pk,
+                                    &metric.acc_pk,
+                                    &metric.dated,
+                                    &metric.val,
+                                ],
+                            )
+                            .await
+                        {
+                            Ok(_) => trace!("inserted metric data for [{tkr}] {title}"),
+                            Err(err) => {
+                                error!(
+                                    "failed to insert metric data for [{tkr}] {title}, error({err})"
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    .await;
+                }
+
+                Arc::into_inner(transaction)
+                    .expect("failed to unpack transaction")
+                    .commit()
+                    .await
+                    .expect("failed to commit transaction");
+
+                debug!(
+                    "metric data inserted for [{}] {}, {}",
+                    &ticker.ticker,
+                    &ticker.title,
+                    crate::time_elapsed(time)
                 );
             }
         })
         .await;
+
     Ok(())
 }
 
@@ -212,9 +224,6 @@ struct Ticker {
 //      },
 //      ...
 // ]
-// #[derive(Debug)]
-// struct Metrics(Vec<Metric>);
-
 #[derive(Debug)]
 struct Metric {
     symbol_pk: i32,

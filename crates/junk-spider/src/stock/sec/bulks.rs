@@ -1,5 +1,4 @@
 use crate::fs::{download_file, unzip};
-use crate::http::*;
 use tracing::{debug, error, info};
 
 // 1. check if downloads are necessary
@@ -16,7 +15,7 @@ const SUBMISSIONS_URL: &'static str =
 
 /// Scrape the SEC website for the latest company metrics and filings metadata.
 pub async fn scrape() -> anyhow::Result<()> {
-    let http_client = build_client();
+    let http_client = crate::std_client_build();
 
     info!("downloading companyfacts.zip and submissions.zip ...");
 
@@ -70,16 +69,10 @@ pub async fn scrape() -> anyhow::Result<()> {
         "./buffer/submissions"
     );
 
+    // clean up the zips
     debug!("deleting metrics.zip and submissions.zip");
     tokio::fs::remove_file("./buffer/metrics.zip").await?;
     tokio::fs::remove_file("./buffer/submissions.zip").await?;
 
     Ok(())
-}
-
-fn build_client() -> HttpClient {
-    reqwest::ClientBuilder::new()
-        .user_agent(var("USER_AGENT").expect("failed to read USER_AGENT"))
-        .build()
-        .expect("failed to build reqwest client")
 }

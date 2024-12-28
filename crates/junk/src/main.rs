@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     // read cli inputs
     use cli::Commands::*;
     match cli.command {
-        // scrape endpoints
+        // `junk spider <subarg>`: scrape endpoints
         Spider => {
             use junk_spider as spider;
 
@@ -76,8 +76,11 @@ async fn main() -> anyhow::Result<()> {
             //    a) download bulks
             // spider::stock::sec::bulks::scrape().await?;
             // spider::stock::sec::tickers::scrape(&mut pg_client).await?;
-            spider::stock::sec::metrics::scrape(&mut pg_client).await?;
+            // spider::stock::sec::metrics::scrape(&mut pg_client).await?;
             // spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
+
+            // 4. download economic data
+            spider::econ::fred::scrape(&mut pg_client).await?;
 
             info!(
                 "crypto finishing scraping, time elapsed: {:?}",

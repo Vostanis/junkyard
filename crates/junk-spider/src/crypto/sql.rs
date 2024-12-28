@@ -1,9 +1,8 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 // interval pk mappings
 lazy_static::lazy_static! {
+    /// Static mapping of interval strings to primary keys (shortcuts a PostgreSQL query).
     pub(crate) static ref INTERVAL_PKS: HashMap<String, i32> = {
         let mut map = HashMap::new();
         map.insert("30m".to_string(), 1);
@@ -18,7 +17,7 @@ lazy_static::lazy_static! {
 // prices
 ///////////////////////////////////////////////////////
 
-// insert price cell
+/// insert price cell
 pub(crate) const INSERT_PRICE: &'static str = "
     INSERT INTO crypto.prices (
         symbol_pk, 
@@ -38,37 +37,13 @@ pub(crate) const INSERT_PRICE: &'static str = "
 ";
 
 ///////////////////////////////////////////////////////
-// sources
-///////////////////////////////////////////////////////
-
-// insert source
-pub(crate) const INSERT_SOURCE: &'static str = "
-    INSERT INTO crypto.sources (pk, source)
-    VALUES ($1)
-    ON CONFLICT (source)
-    DO NOTHING
-";
-
-// return source primary key
-pub(crate) const SELECT_SOURCE_PK: &'static str = "
-    SELECT pk FROM crypto.sources
-    WHERE sources = $1
-";
-
-///////////////////////////////////////////////////////
 // symbols
 ///////////////////////////////////////////////////////
 
-// insert symbol
+/// insert symbol
 pub(crate) const INSERT_SYMBOL: &'static str = "
     INSERT INTO crypto.symbols (symbol)
     VALUES ($1)
     ON CONFLICT (symbol)
     DO NOTHING
-";
-
-// return symbol primary key
-pub(crate) const SELECT_SYMBOL_PK: &'static str = "
-    SELECT pk FROM crypto.symbols
-    WHERE symbol = $1
 ";

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::stock::common::de_cik;
 use crate::{http::*, stock::sql};
 use futures::{stream, StreamExt};

@@ -4,14 +4,17 @@
 ///
 //////////////////////////////////////////////////////////////////////
 
-/// Cryptocurrency data collection.
+/// Cryptocurrency data, collected from the REST APIs of various exchanges.
 ///
 /// Examples include **Binance, KuCoin, MEXC, Kraken**.
 pub mod crypto;
 
-// pub mod econ;
+/// Economic data;
+///
+/// - US data collected from [FRED](https://fred.stlouisfed.org/docs/api/fred/).
+pub mod econ;
 
-/// Stock data collection.
+/// Stock data, collected from various sources.
 ///
 /// Examples include **Yahoo! Finance & the SEC**.
 pub mod stock;
