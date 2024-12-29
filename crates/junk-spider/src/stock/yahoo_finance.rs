@@ -1,8 +1,11 @@
 use super::sql;
 use crate::http::*;
 use futures::{stream, StreamExt};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::Deserialize;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
@@ -19,7 +22,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             error!("failed to fetch stock.tickers, error({err})");
             err
         })?
-        .into_iter()
+        .into_par_iter()
         .map(|row| Ticker {
             pk: row.get(0),
             ticker: row.get(1),
@@ -29,6 +32,22 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
 
     let pg_client = Arc::new(Mutex::new(pg_client));
 
+    // progress bar
+    let multi_pb = MultiProgress::new();
+    let style = ProgressStyle::with_template(
+        "[{elapsed_precise}] [{bar:57.green}] {pos:>7}/{len:7} {msg} {spinner.red}",
+    )
+    .map_err(|err| {
+        error!("failed to set progress bar style {err}");
+        err
+    })?
+    .progress_chars("=> ");
+    let num = tickers.len();
+    let pb = multi_pb.add(ProgressBar::new(num as u64));
+    pb.set_style(style);
+    pb.set_message("collecting stock prices");
+    pb.enable_steady_tick(Duration::from_millis(100));
+
     // stream over tickers and fetch prices from Yahoo Finance
     info!("fetching Yahoo Finance prices ...");
     let http_client = crate::std_client_build();
@@ -37,11 +56,19 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         .for_each_concurrent(12, |ticker| {
             let http_client = &http_client;
             let pg_client = pg_client.clone();
+            let pb = pb.clone();
+            let multi_pb = multi_pb.clone();
             async move {
+                let spinner_style = ProgressStyle::default_spinner()
+                    .template("\t|_ {msg} {spinner}")
+                    .expect("failed to set spinner style");
+
+                let spinner = multi_pb.add(ProgressBar::new_spinner().with_message(format!("fetching {}", &ticker.ticker)).with_style(spinner_style)); 
+                spinner.enable_steady_tick(Duration::from_millis(100));
                 let url = format!(
-                "https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?range=10y&interval=1d",
-                ticker = ticker.ticker
-            );
+                    "https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?range=10y&interval=1d",
+                    ticker = ticker.ticker
+                );
 
                 // fetch raw http response
                 let response = match http_client.get(url).send().await {
@@ -56,6 +83,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                 };
 
                 // deserialize the response to JSON
+                spinner.set_message(format!("deserializing {} reponse", &ticker.ticker));
                 let price_response: PriceResponse = match response.json().await {
                     Ok(json) => json,
                     Err(err) => {
@@ -68,6 +96,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                 };
 
                 // transform deserialized response
+                spinner.set_message(format!("transforming {}", &ticker.ticker));
                 let prices = if let Some(data) = price_response.chart.result {
                     trace!(
                         "price results found; transforming price data for [{}] {}",
@@ -122,16 +151,18 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                 };
 
                 // insert price data to pg
+                spinner.set_message(format!("waiting to insert {}", &ticker.ticker));
                 let mut pg_client = pg_client.lock().await;
+                spinner.set_message(format!("inserting {}", &ticker.ticker));
                 match prices
                     .insert(&mut pg_client, &ticker.pk, &ticker.ticker, &ticker.title)
                     .await
                 {
-                    Ok(_) => trace!(
+                    Ok(_) => {trace!(
                         "price data inserted successfully for [{}] {}",
                         &ticker.ticker,
                         &ticker.title
-                    ),
+                    ); pb.inc(1)},
                     Err(err) => {
                         error!(
                             "failed to insert price data for [{}] {}, error({err})",
@@ -140,6 +171,8 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                         return;
                     }
                 }
+
+                spinner.set_message(format!("{} collected", &ticker.ticker));
             }
         })
         .await;

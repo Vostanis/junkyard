@@ -51,7 +51,25 @@ async fn main() -> anyhow::Result<()> {
 
         // test env
         Test => {
-            println!("Hello, World!");
+            trace!("connecting to findump ...");
+            let (mut pg_client, pg_conn) = tokio_postgres::connect(
+                &dotenv::var("FINDUMP_URL").expect("environment variable FINDUMP_URL"),
+                tokio_postgres::NoTls,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!("findump connection error: {}", err);
+                err
+            })?;
+
+            tokio::spawn(async move {
+                if let Err(err) = pg_conn.await {
+                    tracing::error!("findump connection error: {}", err);
+                }
+            });
+            tracing::debug!("findump connection established");
+
+            junk_spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
         }
     }
 
