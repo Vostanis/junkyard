@@ -35,7 +35,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     // progress bar
     let multi_pb = MultiProgress::new();
     let style = ProgressStyle::with_template(
-        "[{elapsed_precise}] [{bar:57.green}] {pos:>7}/{len:7} {msg} {spinner.red}",
+        "[{elapsed_precise}] [{bar:57.green}] {pos:>5}/{len} {msg} (rate: {per_sec}) [ETA: {eta}]",
     )
     .map_err(|err| {
         error!("failed to set progress bar style {err}");
@@ -63,7 +63,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     .template("\t|_ {msg} {spinner}")
                     .expect("failed to set spinner style");
 
-                let spinner = multi_pb.add(ProgressBar::new_spinner().with_message(format!("fetching {}", &ticker.ticker)).with_style(spinner_style)); 
+                let spinner = multi_pb.add(ProgressBar::new_spinner().with_message(format!("fetching [{}] {}", &ticker.ticker, &ticker.title)).with_style(spinner_style)); 
                 spinner.enable_steady_tick(Duration::from_millis(100));
                 let url = format!(
                     "https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?range=10y&interval=1d",
@@ -83,7 +83,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                 };
 
                 // deserialize the response to JSON
-                spinner.set_message(format!("deserializing {} reponse", &ticker.ticker));
+                spinner.set_message(format!("deserializing [{}] {} reponse", &ticker.ticker, &ticker.title));
                 let price_response: PriceResponse = match response.json().await {
                     Ok(json) => json,
                     Err(err) => {
@@ -151,9 +151,9 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                 };
 
                 // insert price data to pg
-                spinner.set_message(format!("waiting to insert {}", &ticker.ticker));
+                spinner.set_message(format!("waiting to insert [{}] {}", &ticker.ticker, &ticker.title));
                 let mut pg_client = pg_client.lock().await;
-                spinner.set_message(format!("inserting {}", &ticker.ticker));
+                spinner.set_message(format!("inserting [{}] {}", &ticker.ticker, &ticker.title));
                 match prices
                     .insert(&mut pg_client, &ticker.pk, &ticker.ticker, &ticker.title)
                     .await
