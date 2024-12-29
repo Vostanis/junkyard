@@ -7,14 +7,23 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Sets the level of tracing
-    #[arg(long, global = true)]
+    /// Sets the level of tracing.
+    #[arg(short, long, global = true)]
     pub trace: Option<TraceLevel>,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    Spider,
+    /// Webscrape data and collect it to the PostgreSQL database (findump).
+    Spider {
+        /// Specify the endpoints to webscrape.
+        ///
+        /// If no endpoints are provided, spider will collect all.
+        #[arg(short, long)]
+        endpoints: Option<Vec<Endpoint>>,
+    },
+
+    /// Test suite.
     Test,
 }
 
@@ -26,4 +35,16 @@ pub enum TraceLevel {
     INFO,
     TRACE,
     WARN,
+}
+
+#[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Endpoint {
+    /// Cryptocurrency price data.
+    Crypto,
+
+    /// Economic data.
+    Econ,
+
+    /// Stock price & filings data.
+    Stocks,
 }
