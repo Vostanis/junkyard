@@ -22,14 +22,15 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // set the trace level
-    let log_level = match cli.trace {
-        TraceLevel::DEBUG => Level::DEBUG,
-        TraceLevel::ERROR => Level::ERROR,
-        TraceLevel::INFO => Level::INFO,
-        TraceLevel::TRACE => Level::TRACE,
-        TraceLevel::WARN => Level::WARN,
-    };
-    preprocess(log_level);
+    if let Some(trace_level) = cli.trace {
+        preprocess(match trace_level {
+            TraceLevel::DEBUG => Level::DEBUG,
+            TraceLevel::ERROR => Level::ERROR,
+            TraceLevel::INFO => Level::INFO,
+            TraceLevel::TRACE => Level::TRACE,
+            TraceLevel::WARN => Level::WARN,
+        });
+    }
     trace!("command line input recorded: {cli:?}");
 
     // read cli inputs

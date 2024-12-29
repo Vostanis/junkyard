@@ -8,8 +8,8 @@ pub struct Cli {
     pub command: Commands,
 
     /// Sets the level of tracing
-    #[arg(long, default_value = "INFO", global = true)]
-    pub trace: TraceLevel,
+    #[arg(long, global = true)]
+    pub trace: Option<TraceLevel>,
 }
 
 #[derive(Subcommand, Debug)]
