@@ -1,5 +1,6 @@
 use super::sql;
 use crate::http::*;
+use deadpool_postgres::{Client, Pool};
 use futures::{stream, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -12,7 +13,12 @@ use tracing::{debug, error, info, trace};
 // scrape
 // ----------------------------------------------------------------------------
 
-pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
+pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
+    let pg_client = pool.get().await.map_err(|err| {
+        error!("failed to get pg client from pool, error({err})");
+        err
+    })?;
+
     // return all tickers from the database
     info!("fetching stock.tickers ...");
     let tickers: Vec<Ticker> = pg_client
@@ -30,7 +36,7 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         })
         .collect();
 
-    let pg_client = Arc::new(Mutex::new(pg_client));
+    // let pg_client = Arc::new(Mutex::new(pg_client));
 
     // progress bar
     let multi_pb = MultiProgress::new();
@@ -55,7 +61,6 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
     stream
         .for_each_concurrent(12, |ticker| {
             let http_client = &http_client;
-            let pg_client = pg_client.clone();
             let pb = pb.clone();
             let multi_pb = multi_pb.clone();
             async move {
@@ -152,7 +157,10 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
 
                 // insert price data to pg
                 spinner.set_message(format!("waiting to insert [{}] {}", &ticker.ticker, &ticker.title));
-                let mut pg_client = pg_client.lock().await;
+                let mut pg_client = pool.get().await.map_err(|err| {
+                    error!("failed to get pg client from pool, error({err})");
+                    err
+                }).unwrap();
                 spinner.set_message(format!("inserting [{}] {}", &ticker.ticker, &ticker.title));
                 match prices
                     .insert(&mut pg_client, &ticker.pk, &ticker.ticker, &ticker.title)

@@ -55,7 +55,7 @@ pub(crate) async fn run(endpoints: Vec<Endpoint>) -> anyhow::Result<()> {
                 spider::stock::sec::bulks::scrape().await?;
                 spider::stock::sec::tickers::scrape(&mut pg_client).await?;
                 spider::stock::sec::metrics::scrape(&mut pg_client).await?;
-                spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
+                // spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
 
                 info!("stock data collected, time elapsed: {:?}", time.elapsed());
             }
