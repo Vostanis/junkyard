@@ -7,7 +7,7 @@ use clap::Parser;
 use cli::{Cli, TraceLevel};
 use deadpool_postgres::{ManagerConfig, RecyclingMethod};
 use dotenv::var;
-use tracing::{subscriber, trace, Level};
+use tracing::{debug, subscriber, trace, Level};
 use tracing_subscriber::FmtSubscriber;
 
 ////////////////////////////////////////////////////////////////////////////
@@ -53,34 +53,19 @@ async fn main() -> anyhow::Result<()> {
 
         // test env
         Test => {
+            trace!("creating postgres connection pool config");
             let mut pg_config = deadpool_postgres::Config::new();
             pg_config.url = Some(var("FINDUMP_URL")?);
             pg_config.manager = Some(ManagerConfig {
                 recycling_method: RecyclingMethod::Fast,
             });
 
+            trace!("creating findump connection pool");
             let pool = pg_config.create_pool(
                 Some(deadpool_postgres::Runtime::Tokio1),
                 tokio_postgres::NoTls,
             )?;
-
-            // trace!("connecting to findump ...");
-            // let (mut pg_client, pg_conn) = tokio_postgres::connect(
-            //     &dotenv::var("FINDUMP_URL").expect("environment variable FINDUMP_URL"),
-            //     tokio_postgres::NoTls,
-            // )
-            // .await
-            // .map_err(|err| {
-            //     tracing::error!("findump connection error: {}", err);
-            //     err
-            // })?;
-            //
-            // tokio::spawn(async move {
-            //     if let Err(err) = pg_conn.await {
-            //         tracing::error!("findump connection error: {}", err);
-            //     }
-            // });
-            // tracing::debug!("findump connection established");
+            debug!("findump connection pool established");
 
             junk_spider::stock::yahoo_finance::scrape(&pool).await?;
         }

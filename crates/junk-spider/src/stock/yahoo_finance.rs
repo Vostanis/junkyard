@@ -39,20 +39,38 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
     // let pg_client = Arc::new(Mutex::new(pg_client));
 
     // progress bar
+    let num = tickers.len();
     let multi_pb = MultiProgress::new();
     let style = ProgressStyle::with_template(
-        "[{elapsed_precise}] [{bar:57.green}] {pos:>5}/{len} {msg} (rate: {per_sec}) [ETA: {eta}]",
+        " {msg:<9.green} [ {bar:57.green} ] {pos:<2.green} [Rate: {per_sec}, ETA: {eta}]",
     )
     .map_err(|err| {
         error!("failed to set progress bar style {err}");
         err
     })?
-    .progress_chars("=> ");
-    let num = tickers.len();
+    .progress_chars("## ");
+
+    let pb_msg = multi_pb.add(
+        ProgressBar::new_spinner().with_style(
+            ProgressStyle::default_spinner()
+                .template("{msg}: {elapsed}")
+                .expect("failed to set spinner style"),
+        ),
+    );
+    pb_msg.set_message(format!("collecting {num} ticker prices"));
+
     let pb = multi_pb.add(ProgressBar::new(num as u64));
     pb.set_style(style);
-    pb.set_message("collecting stock prices");
-    pb.enable_steady_tick(Duration::from_millis(100));
+    pb.set_message("SUCCESSES");
+
+    let pb_fails = multi_pb.add(
+        ProgressBar::new(num as u64).with_style(
+            ProgressStyle::default_bar()
+                .template(" {msg:>9.red} [ {bar:57.red} ] {pos:<2.red}")?
+                .progress_chars("## "),
+        ),
+    );
+    pb_fails.set_message("FAILURES");
 
     // stream over tickers and fetch prices from Yahoo Finance
     info!("fetching Yahoo Finance prices ...");
@@ -62,10 +80,12 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
         .for_each_concurrent(12, |ticker| {
             let http_client = &http_client;
             let pb = pb.clone();
+            let pb_fails = pb_fails.clone();
+            let pb_msg = pb_msg.clone();
             let multi_pb = multi_pb.clone();
             async move {
                 let spinner_style = ProgressStyle::default_spinner()
-                    .template("\t|_ {msg} {spinner}")
+                    .template("\t|_ {msg}")
                     .expect("failed to set spinner style");
 
                 let spinner = multi_pb.add(ProgressBar::new_spinner().with_message(format!("fetching [{}] {}", &ticker.ticker, &ticker.title)).with_style(spinner_style)); 
@@ -83,6 +103,7 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                             "failed to fetch Yahoo Finance prices for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
+                        pb_fails.inc(1);
                         return;
                     }
                 };
@@ -96,6 +117,7 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                             "failed to parse Yahoo Finance prices for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
+                        pb_fails.inc(1);
                         return;
                     }
                 };
@@ -152,6 +174,7 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                         "failed to parse Yahoo Finance prices for [{}] {}, error(no results found within http response)",
                         &ticker.ticker, &ticker.title
                     );
+                        pb_fails.inc(1);
                     return;
                 };
 
@@ -170,12 +193,13 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                         "price data inserted successfully for [{}] {}",
                         &ticker.ticker,
                         &ticker.title
-                    ); pb.inc(1)},
+                    ); pb.inc(1); pb_msg.inc(1)},
                     Err(err) => {
                         error!(
                             "failed to insert price data for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
+                        pb_fails.inc(1);
                         return;
                     }
                 }
