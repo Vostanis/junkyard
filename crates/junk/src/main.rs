@@ -39,6 +39,12 @@ async fn main() -> anyhow::Result<()> {
     }
     trace!("command line input recorded: {cli:?}");
 
+    // if no trace level provided, use tui
+    let tui = match cli.trace {
+        Some(_) => false,
+        None => true,
+    };
+
     // read cli inputs
     use cli::Commands::*;
     match cli.command {
@@ -67,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
             )?;
             debug!("findump connection pool established");
 
-            junk_spider::stock::yahoo_finance::scrape(&pool).await?;
+            junk_spider::stock::yahoo_finance::scrape(&pool, tui).await?;
         }
     }
 

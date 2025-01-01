@@ -1,19 +1,19 @@
 use super::sql;
 use crate::http::*;
-use deadpool_postgres::{Client, Pool};
+use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace};
 
 // scrape
 // ----------------------------------------------------------------------------
 
-pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
+pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
+    // wait for a pg client from the pool
     let pg_client = pool.get().await.map_err(|err| {
         error!("failed to get pg client from pool, error({err})");
         err
@@ -36,41 +36,54 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
         })
         .collect();
 
-    // let pg_client = Arc::new(Mutex::new(pg_client));
-
     // progress bar
     let num = tickers.len();
-    let multi_pb = MultiProgress::new();
-    let style = ProgressStyle::with_template(
-        " {msg:<9.green} [ {bar:57.green} ] {pos:<2.green} [Rate: {per_sec}, ETA: {eta}]",
-    )
-    .map_err(|err| {
-        error!("failed to set progress bar style {err}");
-        err
-    })?
-    .progress_chars("## ");
+    let (multi, total, success, fail) = if tui {
+        // overall multi progress bar
+        let multi = MultiProgress::new();
 
-    let pb_msg = multi_pb.add(
-        ProgressBar::new_spinner().with_style(
-            ProgressStyle::default_spinner()
-                .template("{msg}: {elapsed}")
-                .expect("failed to set spinner style"),
-        ),
-    );
-    pb_msg.set_message(format!("collecting {num} ticker prices"));
+        // total number of tickers to collect
+        let total = multi.add(
+            // ProgressBar::new_spinner().with_style(
+            //     ProgressStyle::default_spinner()
+            //         .template("{msg}: {elapsed}")
+            //         .expect("failed to set spinner style"),
+            // ),
+            ProgressBar::new(num as u64).with_style(
+                ProgressStyle::default_bar()
+                    .template("collecting stock prices {spinner:.magenta}\n\n {msg:>9.white} |{bar:57.white/grey} {pos:<2} / {human_len} [Time Elapsed: {elapsed_precise}, Rate: {per_sec}, ETA: {eta}]")?
+                    .progress_chars("## "),
+            ),
+        );
+        total.set_message("total");
+        total.enable_steady_tick(Duration::from_millis(100));
 
-    let pb = multi_pb.add(ProgressBar::new(num as u64));
-    pb.set_style(style);
-    pb.set_message("SUCCESSES");
+        // total successful collections
+        let success = multi.insert_after(
+            &total,
+            ProgressBar::new(num as u64).with_style(
+                ProgressStyle::default_bar()
+                    .template(" {msg:>9.green} |{bar:57.green} {pos:<2.green}")?
+                    .progress_chars("## "),
+            ),
+        );
+        success.set_message("successes");
 
-    let pb_fails = multi_pb.add(
-        ProgressBar::new(num as u64).with_style(
-            ProgressStyle::default_bar()
-                .template(" {msg:>9.red} [ {bar:57.red} ] {pos:<2.red}")?
-                .progress_chars("## "),
-        ),
-    );
-    pb_fails.set_message("FAILURES");
+        // total failed collections
+        let fails = multi.insert_after(
+            &success,
+            ProgressBar::new(num as u64).with_style(
+                ProgressStyle::default_bar()
+                    .template(" {msg:>9.red} |{bar:57.red} {pos:<2.red}")?
+                    .progress_chars("## "),
+            ),
+        );
+        fails.set_message("failures");
+
+        (Some(multi), Some(total), Some(success), Some(fails))
+    } else {
+        (None, None, None, None)
+    };
 
     // stream over tickers and fetch prices from Yahoo Finance
     info!("fetching Yahoo Finance prices ...");
@@ -79,20 +92,27 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
     stream
         .for_each_concurrent(12, |ticker| {
             let http_client = &http_client;
-            let pb = pb.clone();
-            let pb_fails = pb_fails.clone();
-            let pb_msg = pb_msg.clone();
-            let multi_pb = multi_pb.clone();
-            async move {
-                let spinner_style = ProgressStyle::default_spinner()
-                    .template("\t|_ {msg}")
-                    .expect("failed to set spinner style");
 
-                let spinner = multi_pb.add(ProgressBar::new_spinner().with_message(format!("fetching [{}] {}", &ticker.ticker, &ticker.title)).with_style(spinner_style)); 
+            // progress bars
+            let multi = multi.clone();
+            let total = total.clone();
+            let success = success.clone();
+            let fail = fail.clone();
+            async move {
+
+                // if tui is enabled, create a progress bar, per task currently being executed
+                let spinner = multi.unwrap_or_default().add(
+                    ProgressBar::new_spinner()
+                        .with_message(format!("fetching [{}] {}", &ticker.ticker, &ticker.title))
+                        .with_style(ProgressStyle::default_spinner()
+                    .template("\t    > {msg:.italic}")
+                    .expect("failed to set spinner style"))
+                ); 
                 spinner.enable_steady_tick(Duration::from_millis(100));
+
                 let url = format!(
-                    "https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?range=10y&interval=1d",
-                    ticker = ticker.ticker
+                    "https://query2.finance.yahoo.com/v8/finance/chart/{}?range=10y&interval=1d",
+                    &ticker.ticker
                 );
 
                 // fetch raw http response
@@ -103,7 +123,12 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                             "failed to fetch Yahoo Finance prices for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
-                        pb_fails.inc(1);
+
+                        if tui {
+                            fail.unwrap().inc(1);
+                            total.unwrap().inc(1);
+                        }
+
                         return;
                     }
                 };
@@ -117,7 +142,12 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                             "failed to parse Yahoo Finance prices for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
-                        pb_fails.inc(1);
+
+                        if tui {
+                            fail.unwrap().inc(1);
+                            total.unwrap().inc(1);
+                        }
+                        
                         return;
                     }
                 };
@@ -174,7 +204,12 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                         "failed to parse Yahoo Finance prices for [{}] {}, error(no results found within http response)",
                         &ticker.ticker, &ticker.title
                     );
-                        pb_fails.inc(1);
+
+                    if tui {
+                        fail.unwrap().inc(1);
+                        total.unwrap().inc(1);
+                    }
+
                     return;
                 };
 
@@ -185,21 +220,35 @@ pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
                     err
                 }).unwrap();
                 spinner.set_message(format!("inserting [{}] {}", &ticker.ticker, &ticker.title));
+
                 match prices
                     .insert(&mut pg_client, &ticker.pk, &ticker.ticker, &ticker.title)
                     .await
                 {
-                    Ok(_) => {trace!(
-                        "price data inserted successfully for [{}] {}",
-                        &ticker.ticker,
-                        &ticker.title
-                    ); pb.inc(1); pb_msg.inc(1)},
+                    Ok(_) => {
+                        trace!(
+                            "price data inserted successfully for [{}] {}",
+                            &ticker.ticker,
+                            &ticker.title
+                        ); 
+
+                        if tui {
+                            success.unwrap().inc(1);
+                            total.unwrap().inc(1);
+                        }
+                    },
                     Err(err) => {
                         error!(
                             "failed to insert price data for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
-                        pb_fails.inc(1);
+
+                        if tui {
+                            fail.unwrap().inc(1);
+                            total.unwrap().inc(1);
+                                                    
+                        }
+
                         return;
                     }
                 }
