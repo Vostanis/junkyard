@@ -1228,6 +1228,7 @@ dependencies = [
  "hmac",
  "indicatif",
  "lazy_static",
+ "num_cpus",
  "rayon",
  "reqwest",
  "serde",

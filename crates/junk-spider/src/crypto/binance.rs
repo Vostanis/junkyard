@@ -1,13 +1,16 @@
 use super::sql;
 use crate::http::*;
+use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::ClientBuilder;
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::time::Duration;
 use tracing::{debug, error, info, trace};
 
 const BROKERAGE: &str = "Binance";
@@ -22,10 +25,24 @@ const BROKERAGE: &str = "Binance";
 // core
 /////////////////////////////////////////////////////////////////////////////////
 
-pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
-    let http_client = build_client();
+pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
+    // wait for a pg client from the pool
+    let mut pg_client = pool.get().await.map_err(|err| {
+        error!("failed to get pg client from pool, error({err})");
+        err
+    })?;
 
     // fetch the tickers
+    let pb = if tui {
+        let pb = ProgressBar::new_spinner()
+            .with_message("fetching tickers ...")
+            .with_style(ProgressStyle::default_spinner().template("{msg} {spinner:.magenta}")?);
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    } else {
+        ProgressBar::hidden()
+    };
+    let http_client = build_client();
     let tickers: Tickers = http_client
         .get("https://api.binance.com/api/v1/ticker/allBookTickers")
         .send()
@@ -40,8 +57,18 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             error!("failed to deserialize {BROKERAGE} tickers, error({err})");
             err
         })?;
+    pb.finish_with_message("fetching tickers ... done");
 
     // 1. insert binance source
+    let pb = if tui {
+        let pb = ProgressBar::new_spinner()
+            .with_message("inserting tickers ...")
+            .with_style(ProgressStyle::default_spinner().template("{msg} {spinner:.magenta}")?);
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    } else {
+        ProgressBar::hidden()
+    };
     pg_client
         .query(
             "INSERT INTO crypto.sources (source) VALUES ($1) ON CONFLICT DO NOTHING",
@@ -54,41 +81,44 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
         })?;
 
     // 2. insert tickers
-    tickers.insert(pg_client).await?;
+    tickers.insert(&mut pg_client).await?;
+    pb.finish_with_message("inserting tickers ... done");
 
     // 3. fetch & insert prices (using the previous 2 datatables)
     // 3a. fetch symbols
     info!("fetching symbols ...");
-    let rows = pg_client
+    let symbol_pks: HashMap<String, i32> = pg_client
         .query("SELECT pk, symbol FROM crypto.symbols", &[])
         .await
         .map_err(|err| {
             error!("failed to fetch crypto.symbols");
             err
-        })?;
-    let mut symbol_pks: HashMap<String, i32> = HashMap::new();
-    for row in rows {
-        let pk: i32 = row.get("pk");
-        let symbol: String = row.get("symbol");
-        symbol_pks.insert(symbol, pk);
-    }
+        })?
+        .into_par_iter()
+        .map(|row| {
+            let pk: i32 = row.get("pk");
+            let symbol: String = row.get("symbol");
+            (symbol, pk)
+        })
+        .collect();
     let symbol_pks = Arc::new(symbol_pks);
 
     // 3b. fetch sources
     info!("fetching sources ...");
-    let rows = pg_client
+    let source_pks: HashMap<String, i16> = pg_client
         .query("SELECT pk, source FROM crypto.sources", &[])
         .await
         .map_err(|err| {
             error!("failed to fetch crypto.sources");
             err
-        })?;
-    let mut source_pks: HashMap<String, i16> = HashMap::new();
-    for row in rows {
-        let pk: i16 = row.get("pk");
-        let source: String = row.get("source");
-        source_pks.insert(source, pk);
-    }
+        })?
+        .into_par_iter()
+        .map(|row| {
+            let pk: i16 = row.get("pk");
+            let source: String = row.get("source");
+            (source, pk)
+        })
+        .collect();
     let source_pk = match source_pks.get(BROKERAGE) {
         Some(pk) => *pk,
         None => {
@@ -96,51 +126,152 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             return Err(anyhow::anyhow!("failed to find {BROKERAGE} source pk"));
         }
     };
+    drop(pg_client);
+    // let pg_client = Arc::new(Mutex::new(pg_client));
 
-    let pg_client = Arc::new(Mutex::new(pg_client));
+    // progress bar
+    let num = tickers.0.len();
+    let (multi, total, success, fail) = if tui {
+        // overall multi progress bar
+        let multi = MultiProgress::new();
+
+        // total number of tickers to collect
+        let total = multi.add(
+            ProgressBar::new(num as u64).with_style(
+                ProgressStyle::default_bar()
+                    .template("collecting crypto prices ... {spinner:.magenta}\n {msg:>9.white} |{bar:57.white/grey}| {pos:<2} / {human_len} ({percent_precise}%) [Time: {elapsed}, Rate: {per_sec}, ETA: {eta}]")?
+                    .progress_chars("## "),
+            ),
+        );
+        total.set_message("total");
+        total.enable_steady_tick(Duration::from_millis(100));
+
+        // total successful collections
+        let success = multi.insert_after(
+            &total,
+            ProgressBar::new(num as u64).with_style(
+                ProgressStyle::default_bar()
+                    .template(" {msg:>9.green} |{bar:57.green}| {pos:<2.green}")?
+                    .progress_chars("## "),
+            ),
+        );
+        success.set_message("successes");
+
+        // total failed collections
+        let fails = multi.insert_after(
+            &success,
+            ProgressBar::new(num as u64).with_style(
+                ProgressStyle::default_bar()
+                    .template(" {msg:>9.red} |{bar:57.red}| {pos:<2.red}")?
+                    .progress_chars("## "),
+            ),
+        );
+        fails.set_message("failures");
+
+        (Some(multi), Some(total), Some(success), Some(fails))
+    } else {
+        (None, None, None, None)
+    };
 
     // 3c. fetch prices for tickers
     info!("fetching prices ...");
     let stream = stream::iter(&tickers.0);
     stream
-        .for_each_concurrent(12, |ticker| {
+        .for_each_concurrent(num_cpus::get(), |ticker| {
             let http_client = &http_client;
-            let pg_client = pg_client.clone();
             let symbol_pks = &symbol_pks;
             let symbol = &ticker.symbol;
             let source_pk = &source_pk;
+
+            // progress bars
+            let multi = multi.clone();
+            let total = total.clone();
+            let success = success.clone();
+            let fail = fail.clone();
             async move {
                 if let Some(symbol_pk) = symbol_pks.get(symbol) {
                     trace!("fetching prices for {}", symbol);
+
+                    // if tui is enabled, create a progress bar, per task currently being executed
+                    let spinner = multi.unwrap_or_default().add(
+                        ProgressBar::new_spinner()
+                            .with_message(format!("fetching prices for {symbol}"))
+                            .with_style(
+                                ProgressStyle::default_spinner()
+                                    .template("\t   | > {msg}")
+                                    .expect("failed to set spinner style"),
+                            ),
+                    );
+                    spinner.enable_steady_tick(Duration::from_millis(50));
+
                     let url = format!(
                         "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000"
                     );
+
+
                     let response = match http_client.get(url).send().await {
                         Ok(data) => data,
                         Err(err) => {
                             error!(
                                 "failed to fetch {BROKERAGE} prices for {symbol}, error({err})",
                             );
+
+                            if tui {
+                                fail.unwrap().inc(1);
+                                total.unwrap().inc(1);
+                            }
+
                             return;
                         }
                     };
 
                     trace!("deserializing prices for {}", symbol);
+                    spinner.set_message(format!("deserializing prices for {symbol}"));
                     let klines: Klines = match response.json().await {
                         Ok(data) => data,
                         Err(err) => {
                             error!("failed to parse {BROKERAGE} prices for {symbol}, error({err})");
+
+                            if tui {
+                                fail.unwrap().inc(1);
+                                total.unwrap().inc(1);
+                            }
+
                             return;
                         }
                     };
 
-                    let mut pg_client = pg_client.lock().await;
+                    spinner.set_message(format!("waiting to insert prices for {symbol}"));
+            let mut pg_client = pool
+                .get()
+                .await
+                .map_err(|err| {
+                    error!("failed to get pg client from pool, error({err})");
+                    err
+                })
+                .unwrap();
+                    // let mut pg_client = pg_client.lock().await;
+                    spinner.set_message(format!("inserting prices for {symbol}"));
                     match klines
                         .insert(&mut pg_client, symbol, *symbol_pk, *source_pk)
                         .await
                     {
-                        Ok(_) => trace!("inserted prices for {symbol}"),
-                        Err(err) => error!("failed to insert prices for {symbol}, error({err})"),
+                        Ok(_) => {
+                            trace!("inserted prices for {symbol}");
+                            
+                            if tui {
+                                success.unwrap().inc(1);
+                                total.unwrap().inc(1);
+                            }
+                        },
+                        Err(err) => {
+                            error!("failed to insert prices for {symbol}, error({err})");
+
+                            if tui {
+                                fail.unwrap().inc(1);
+                                total.unwrap().inc(1);
+                            }
+                        },
                     };
                 } else {
                     error!("failed to find symbol pk for {symbol}");
@@ -148,6 +279,16 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             }
         })
         .await;
+
+    fail.expect("fail bar should have unwrapped")
+        .finish_and_clear();
+    success
+        .expect("success bar should have unwrapped")
+        .finish_and_clear();
+    total
+        .expect("total bar should have unwrapped")
+        .finish_and_clear();
+    println!("collecting crypto prices ... done");
 
     Ok(())
 }

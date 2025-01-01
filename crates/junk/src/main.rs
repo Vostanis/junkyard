@@ -59,6 +59,8 @@ async fn main() -> anyhow::Result<()> {
 
         // test env
         Test => {
+            use junk_spider::*;
+
             trace!("creating postgres connection pool config");
             let mut pg_config = deadpool_postgres::Config::new();
             pg_config.url = Some(var("FINDUMP_URL")?);
@@ -73,7 +75,8 @@ async fn main() -> anyhow::Result<()> {
             )?;
             debug!("findump connection pool established");
 
-            junk_spider::stock::yahoo_finance::scrape(&pool, tui).await?;
+            crypto::binance::scrape(&pool, tui).await?;
+            // stock::yahoo_finance::scrape(&pool, tui).await?;
         }
     }
 
