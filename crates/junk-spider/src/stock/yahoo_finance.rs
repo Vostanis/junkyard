@@ -315,6 +315,7 @@ struct Price {
 }
 
 impl Prices {
+    /// INSERT self to pg rows.
     async fn insert(
         &self,
         pg_client: &mut PgClient,
@@ -376,7 +377,22 @@ impl Prices {
             "[{ticker}] {title} priceset inserted. {}",
             crate::time_elapsed(time)
         );
+        let time = std::time::Instant::now();
 
+        let query = pg_client.prepare("COPY ").await?;
+        let tx = pg_client.transaction().await?;
+
+        Ok(())
+    }
+
+    /// COPY self to pg rows.
+    async fn copy(
+        &self,
+        pg_client: &mut PgClient,
+        stock_pk: &i32,
+        ticker: &String,
+        title: &String,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 }
