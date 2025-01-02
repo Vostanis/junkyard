@@ -1,5 +1,6 @@
 use crate::stock::common::de_cik;
 use crate::{http::*, stock::sql};
+use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
 use serde::de::Visitor;
 use serde::Deserialize;
@@ -9,7 +10,7 @@ use tracing::{debug, error, trace};
 // scrape
 // ----------------------------------------------------------------------------
 
-pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
+pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     let client = build_client();
 
     debug!("fetching SEC Company Tickers");
@@ -27,7 +28,13 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             error!("failed to parse JSON, error({err})");
             err
         })?;
+
+    let pg_client = &mut pool.get().await?;
     tickers.insert(pg_client).await?;
+
+    if tui {
+        println!("SEC Company Tickers inserted");
+    }
 
     Ok(())
 }

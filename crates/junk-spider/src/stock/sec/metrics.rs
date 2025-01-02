@@ -266,7 +266,6 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
 
                     // progress bar
                     let total = total.clone();
-                    let success = success.clone();
                     let fail = fail.clone();
                     async move {
                         match transaction
