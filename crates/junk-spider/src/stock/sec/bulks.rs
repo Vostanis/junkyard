@@ -23,7 +23,7 @@ pub async fn scrape(tui: bool) -> anyhow::Result<()> {
         println!(
             "{bar}\n{name:^40}\n{bar}",
             bar = "=".repeat(40),
-            name = "metrics.zip"
+            name = "SEC companyfacts.zip"
         );
     }
     download_file(&http_client, METRICS_URL, "./buffer/metrics.zip", tui)
@@ -56,7 +56,7 @@ pub async fn scrape(tui: bool) -> anyhow::Result<()> {
         println!(
             "{bar}\n{name:^40}\n{bar}",
             bar = "=".repeat(40),
-            name = "submissions.zip"
+            name = "SEC submissions.zip"
         )
     }
     download_file(

@@ -199,7 +199,6 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                         }
                     };
 
-                    // let mut pg_client = pg_client.lock().await;
                     spinner.set_message(format!("inserting prices for {symbol}"));
                     match klines
                         .insert(&mut pg_client, symbol, *symbol_pk, *source_pk)
@@ -242,7 +241,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     total
         .expect("total bar should have unwrapped")
         .finish_and_clear();
-    println!("collecting crypto prices ... done\n");
+
+    if tui {
+        println!("collecting crypto prices ... done\n");
+    }
 
     Ok(())
 }
