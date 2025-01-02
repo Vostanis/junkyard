@@ -34,8 +34,8 @@ pub(crate) async fn run(endpoints: Vec<Endpoint>) -> anyhow::Result<()> {
 
                 // spider::crypto::binance::scrape(&mut pg_client).await?;
                 // spider::crypto::kucoin::scrape(&mut pg_client).await?;
-                spider::crypto::mexc::scrape(&mut pg_client).await?;
-                spider::crypto::kraken::scrape(&mut pg_client).await?;
+                // spider::crypto::mexc::scrape(&mut pg_client).await?;
+                // spider::crypto::kraken::scrape(&mut pg_client).await?;
 
                 info!("crypto data collected, time elapsed: {:?}", time.elapsed());
             }

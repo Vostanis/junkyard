@@ -64,9 +64,9 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
             error!("failed to dserialize {BROKERAGE} tickers, error({err})");
             err
         })?;
-    pb.set_message("inserting tickers ...");
 
     // 1. insert kucoin source
+    pb.set_message("inserting tickers ...");
     pg_client
         .query(
             "INSERT INTO crypto.sources (source) VALUES ($1) ON CONFLICT DO NOTHING",
@@ -251,6 +251,16 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
             }
         })
         .await;
+
+    fail.expect("fail bar should have unwrapped")
+        .finish_and_clear();
+    success
+        .expect("success bar should have unwrapped")
+        .finish_and_clear();
+    total
+        .expect("total bar should have unwrapped")
+        .finish_and_clear();
+    println!("collecting crypto prices ... done\n");
 
     Ok(())
 }
