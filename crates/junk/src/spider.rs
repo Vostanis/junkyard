@@ -33,7 +33,7 @@ pub(crate) async fn run(endpoints: Vec<Endpoint>) -> anyhow::Result<()> {
                 let time = std::time::Instant::now();
 
                 // spider::crypto::binance::scrape(&mut pg_client).await?;
-                spider::crypto::kucoin::scrape(&mut pg_client).await?;
+                // spider::crypto::kucoin::scrape(&mut pg_client).await?;
                 spider::crypto::mexc::scrape(&mut pg_client).await?;
                 spider::crypto::kraken::scrape(&mut pg_client).await?;
 

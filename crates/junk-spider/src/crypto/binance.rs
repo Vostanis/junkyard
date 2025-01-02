@@ -2,8 +2,7 @@ use super::sql;
 use crate::http::*;
 use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::ClientBuilder;
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
@@ -33,6 +32,9 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     })?;
 
     // fetch the tickers
+    if tui {
+        println!("{bar}\n{BROKERAGE:^40}\n{bar}", bar = "=".repeat(40))
+    }
     let pb = if tui {
         let pb = ProgressBar::new_spinner()
             .with_message("fetching tickers ...")
@@ -57,18 +59,8 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
             error!("failed to deserialize {BROKERAGE} tickers, error({err})");
             err
         })?;
-    pb.finish_with_message("fetching tickers ... done");
+    pb.set_message("inserting tickers ...");
 
-    // 1. insert binance source
-    let pb = if tui {
-        let pb = ProgressBar::new_spinner()
-            .with_message("inserting tickers ...")
-            .with_style(ProgressStyle::default_spinner().template("{msg} {spinner:.magenta}")?);
-        pb.enable_steady_tick(Duration::from_millis(100));
-        pb
-    } else {
-        ProgressBar::hidden()
-    };
     pg_client
         .query(
             "INSERT INTO crypto.sources (source) VALUES ($1) ON CONFLICT DO NOTHING",
@@ -87,38 +79,32 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     // 3. fetch & insert prices (using the previous 2 datatables)
     // 3a. fetch symbols
     info!("fetching symbols ...");
-    let symbol_pks: HashMap<String, i32> = pg_client
-        .query("SELECT pk, symbol FROM crypto.symbols", &[])
-        .await
-        .map_err(|err| {
-            error!("failed to fetch crypto.symbols");
-            err
-        })?
-        .into_par_iter()
-        .map(|row| {
-            let pk: i32 = row.get("pk");
-            let symbol: String = row.get("symbol");
-            (symbol, pk)
-        })
-        .collect();
+    let symbol_pks: HashMap<String, i32> = super::util::fetch_pks(
+        &mut pg_client,
+        "SELECT pk, symbol FROM crypto.symbols",
+        "symbol",
+        "pk",
+    )
+    .await
+    .map_err(|err| {
+        error!("failed to fetch symbols, error({err})");
+        err
+    })?;
     let symbol_pks = Arc::new(symbol_pks);
 
     // 3b. fetch sources
     info!("fetching sources ...");
-    let source_pks: HashMap<String, i16> = pg_client
-        .query("SELECT pk, source FROM crypto.sources", &[])
-        .await
-        .map_err(|err| {
-            error!("failed to fetch crypto.sources");
-            err
-        })?
-        .into_par_iter()
-        .map(|row| {
-            let pk: i16 = row.get("pk");
-            let source: String = row.get("source");
-            (source, pk)
-        })
-        .collect();
+    let source_pks: HashMap<String, i16> = super::util::fetch_pks(
+        &mut pg_client,
+        "SELECT pk, source FROM crypto.sources",
+        "source",
+        "pk",
+    )
+    .await
+    .map_err(|err| {
+        error!("failed to fetch sources, error({err})");
+        err
+    })?;
     let source_pk = match source_pks.get(BROKERAGE) {
         Some(pk) => *pk,
         None => {
@@ -126,49 +112,12 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
             return Err(anyhow::anyhow!("failed to find {BROKERAGE} source pk"));
         }
     };
+
     drop(pg_client);
-    // let pg_client = Arc::new(Mutex::new(pg_client));
 
     // progress bar
-    let num = tickers.0.len();
     let (multi, total, success, fail) = if tui {
-        // overall multi progress bar
-        let multi = MultiProgress::new();
-
-        // total number of tickers to collect
-        let total = multi.add(
-            ProgressBar::new(num as u64).with_style(
-                ProgressStyle::default_bar()
-                    .template("collecting crypto prices ... {spinner:.magenta}\n {msg:>9.white} |{bar:57.white/grey}| {pos:<2} / {human_len} ({percent_precise}%) [Time: {elapsed}, Rate: {per_sec}, ETA: {eta}]")?
-                    .progress_chars("## "),
-            ),
-        );
-        total.set_message("total");
-        total.enable_steady_tick(Duration::from_millis(100));
-
-        // total successful collections
-        let success = multi.insert_after(
-            &total,
-            ProgressBar::new(num as u64).with_style(
-                ProgressStyle::default_bar()
-                    .template(" {msg:>9.green} |{bar:57.green}| {pos:<2.green}")?
-                    .progress_chars("## "),
-            ),
-        );
-        success.set_message("successes");
-
-        // total failed collections
-        let fails = multi.insert_after(
-            &success,
-            ProgressBar::new(num as u64).with_style(
-                ProgressStyle::default_bar()
-                    .template(" {msg:>9.red} |{bar:57.red}| {pos:<2.red}")?
-                    .progress_chars("## "),
-            ),
-        );
-        fails.set_message("failures");
-
-        (Some(multi), Some(total), Some(success), Some(fails))
+        crate::tui::multi_progress(tickers.0.len())?
     } else {
         (None, None, None, None)
     };
@@ -198,7 +147,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                             .with_message(format!("fetching prices for {symbol}"))
                             .with_style(
                                 ProgressStyle::default_spinner()
-                                    .template("\t   | > {msg}")
+                                    .template("\t   > {msg}")
                                     .expect("failed to set spinner style"),
                             ),
                     );
@@ -217,8 +166,8 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                             );
 
                             if tui {
-                                fail.unwrap().inc(1);
-                                total.unwrap().inc(1);
+                                fail.expect("failbar should have unwrapped").inc(1);
+                                total.expect("totalbar should have unwrapped").inc(1);
                             }
 
                             return;
@@ -233,8 +182,8 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                             error!("failed to parse {BROKERAGE} prices for {symbol}, error({err})");
 
                             if tui {
-                                fail.unwrap().inc(1);
-                                total.unwrap().inc(1);
+                                fail.expect("failbar should have unwrapped").inc(1);
+                                total.expect("totalbar should have unwrapped").inc(1);
                             }
 
                             return;
@@ -242,14 +191,14 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     };
 
                     spinner.set_message(format!("waiting to insert prices for {symbol}"));
-            let mut pg_client = pool
-                .get()
-                .await
-                .map_err(|err| {
-                    error!("failed to get pg client from pool, error({err})");
-                    err
-                })
-                .unwrap();
+                    let mut pg_client = match pool.get().await {
+                        Ok(client) => client,
+                        Err(err) => {
+                            error!("failed to get pg client from pool, error({err})");
+                            return;
+                        }
+                    };
+
                     // let mut pg_client = pg_client.lock().await;
                     spinner.set_message(format!("inserting prices for {symbol}"));
                     match klines
@@ -260,21 +209,26 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                             trace!("inserted prices for {symbol}");
                             
                             if tui {
-                                success.unwrap().inc(1);
-                                total.unwrap().inc(1);
+                                success.expect("successbar should have unwrapped").inc(1);
+                                total.expect("totalbar should have unwrapped").inc(1);
                             }
                         },
                         Err(err) => {
                             error!("failed to insert prices for {symbol}, error({err})");
 
                             if tui {
-                                fail.unwrap().inc(1);
-                                total.unwrap().inc(1);
+                                fail.expect("failbar should have unwrapped").inc(1);
+                                total.expect("totalbar should have unwrapped").inc(1);
                             }
                         },
                     };
                 } else {
                     error!("failed to find symbol pk for {symbol}");
+
+                    if tui {
+                        fail.expect("failbar should have unwrapped").inc(1);
+                        total.expect("totalbar should have unwrapped").inc(1);
+                    }
                 }
             }
         })
@@ -288,7 +242,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     total
         .expect("total bar should have unwrapped")
         .finish_and_clear();
-    println!("collecting crypto prices ... done");
+    println!("collecting crypto prices ... done\n");
 
     Ok(())
 }

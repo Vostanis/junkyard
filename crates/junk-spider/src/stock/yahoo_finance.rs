@@ -20,6 +20,13 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     })?;
 
     // return all tickers from the database
+    if tui {
+        println!(
+            "{bar}\n{source:^40}\n{bar}",
+            bar = "=".repeat(40),
+            source = "Yahoo! Finance"
+        )
+    }
     info!("fetching stock.tickers ...");
     let tickers: Vec<Ticker> = pg_client
         .query("SELECT pk, ticker, title FROM stock.tickers", &[])
@@ -102,7 +109,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     .with_message(format!("fetching [{}] {}", &ticker.ticker, &ticker.title))
                     .with_style(
                         ProgressStyle::default_spinner()
-                            .template("\t   | > {msg}")
+                            .template("\t   > {msg}")
                             .expect("failed to set spinner style"),
                     ),
             );
@@ -274,7 +281,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         .finish_and_clear();
     total
         .expect("total bar should have unwrapped")
-        .finish_with_message("collecting stock prices ... done [{elapsed:.magenta}]");
+        .finish_with_message("collecting stock prices ... done [{elapsed:.magenta}]\n");
 
     Ok(())
 }
