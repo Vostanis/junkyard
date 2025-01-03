@@ -8,7 +8,7 @@ use tracing::{debug, error, info, trace};
 pub(crate) async fn run(endpoints: Vec<Endpoint>) -> anyhow::Result<()> {
     // 1. build pg connection
     trace!("connecting to findump ...");
-    let (mut pg_client, pg_conn) = pg::connect(
+    let (_pg_client, pg_conn) = pg::connect(
         &var("FINDUMP_URL").expect("environment variable FINDUMP_URL"),
         NoTls,
     )

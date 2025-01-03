@@ -9,6 +9,7 @@ anyhow.workspace = true
 base64 = "0.22.1"
 chrono.workspace = true
 colored.workspace = true
+deadpool-postgres.workspace = true
 dialoguer.workspace = true
 dotenv.workspace = true
 futures.workspace = true
@@ -18,23 +19,25 @@ indicatif.workspace = true
 rayon.workspace = true
 reqwest.workspace = true
 serde.workspace = true
-serde_json = "1.0.134"
+serde_json.workspace = true
 sha2 = "0.10.8"
 tokio.workspace = true
 tokio-postgres.workspace = true
 tracing.workspace = true
 zip = "2.2.2"
-deadpool-postgres = "0.14.1"
 num_cpus.workspace = true
 
 [dev-dependencies]
 criterion = "0.5.1"
 
+
 ## Benchmarks
 [[bench]]
-name = "scrape_stocks"
-path = "benches/scrape_stocks.rs"
+name = "stock_prices"
+path = "benches/stock_prices.rs"
+harness = false
 
 [[bench]]
-name = "scrape_metrics"
-path = "benches/scrape_metrics.rs"
+name = "stock_metrics"
+path = "benches/stock_metrics.rs"
+harness = false
