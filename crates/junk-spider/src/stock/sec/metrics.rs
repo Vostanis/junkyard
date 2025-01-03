@@ -1,17 +1,40 @@
-use crate::http::*;
 use crate::stock::common::convert_date_type;
 use crate::stock::sql;
+use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
 // scrape
 // -------------------------------------------------------------------------------------------------
-pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
+pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
+    // wait for a pg client from the pool
+    let pg_client = pool.get().await.map_err(|err| {
+        error!("failed to get pg client from pool, error({err})");
+        err
+    })?;
+
     // return all tickers from the database
+    if tui {
+        println!(
+            "{bar}\n{name:^40}\n{bar}",
+            bar = "=".repeat(40),
+            name = "SEC Metrics"
+        )
+    }
+    let pb = if tui {
+        let pb = ProgressBar::new_spinner()
+            .with_message("fetching tickers ...")
+            .with_style(ProgressStyle::default_spinner().template("{msg} {spinner:.magenta}")?);
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    } else {
+        ProgressBar::hidden()
+    };
     info!("fetching stock.tickers ...");
     let tickers: Vec<Ticker> = pg_client
         .query("SELECT pk, cik, ticker, title FROM stock.tickers", &[])
@@ -28,25 +51,54 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             title: row.get(3),
         })
         .collect();
+    pb.finish_with_message("fetching tickers ... done");
 
-    let pg_client = Arc::new(Mutex::new(pg_client));
+    drop(pg_client);
+
+    // progress bar
+    let (multi, total, success, fail) = if tui {
+        crate::tui::multi_progress(tickers.len())?
+    } else {
+        (None, None, None, None)
+    };
 
     info!("fetching SEC metrics ...");
     let stream = stream::iter(tickers);
     stream
-        .for_each_concurrent(12, |ticker| {
+        .for_each_concurrent(num_cpus::get(), |ticker| {
             let time = std::time::Instant::now();
 
-            // create 3 clones of the pg_client for the 3 processes
-            let pk_insert_pg_client = pg_client.clone();
-            let pk_get_pg_client = pg_client.clone();
-            let pg_client = pg_client.clone();
+            // progress bars
+            let multi = multi.clone();
+            let total = total.clone();
+            let success = success.clone();
+            let fail = fail.clone();
             async move {
+                // if tui is enabled, create a progress bar, per task currently being executed
+                let spinner = multi.unwrap_or_default().add(
+                    ProgressBar::new_spinner()
+                        .with_message(format!(
+                            "collecting stock metrics for [{symbol}] {title}",
+                            symbol = &ticker.ticker,
+                            title = &ticker.title
+                        ))
+                        .with_style(
+                            ProgressStyle::default_spinner()
+                                .template("\t   > {msg}")
+                                .expect("failed to set spinner style"),
+                        ),
+                );
+                spinner.enable_steady_tick(Duration::from_millis(50));
+
                 // construct the path
                 let path = format!("./buffer/metrics/CIK{}.json", &ticker.cik);
 
                 // read the file
                 trace!("reading file at path: \"{path}\"");
+                spinner.set_message(format!(
+                    "deserializing metrics for [{}] {}",
+                    &ticker.ticker, &ticker.title
+                ));
                 let json: Facts = match crate::fs::read_json(&path).await {
                     Ok(json) => json,
                     Err(err) => {
@@ -64,6 +116,10 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     &ticker.ticker,
                     &ticker.title
                 );
+                spinner.set_message(format!(
+                    "reformatting metrics for [{}] {}",
+                    &ticker.ticker, &ticker.title
+                ));
                 let mut metrics: Vec<Metric> = vec![];
                 for (dataset_id, metric) in json.facts {
                     // match the dataset_id to any valid datasets included in the static ACC_STDS
@@ -72,10 +128,24 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                         Some(acc_pk) => {
                             // if valid, parse the dataset
                             for (metric_name, dataset) in metric {
+                                spinner.set_message(format!(
+                                    "waiting to fetch Primary Keys for [{}] {}",
+                                    &ticker.ticker, &ticker.title
+                                ));
+                                let pg_client = match pool.get().await {
+                                    Ok(client) => client,
+                                    Err(err) => {
+                                        error!("failed to get pg client from pool, error({err})");
+                                        if tui {
+                                            fail.expect("failbar should have unwrapped").inc(1);
+                                            total.expect("totalbar should have unwrapped").inc(1);
+                                        }
+                                        return;
+                                    }
+                                };
+
                                 // insert the metric name
-                                match pk_insert_pg_client
-                                    .lock()
-                                    .await
+                                match pg_client
                                     .query(sql::INSERT_METRIC_PK, &[&metric_name])
                                     .await
                                 {
@@ -88,14 +158,16 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                                         error!(
                                             "failed to insert metric into metrics_lib, error({err})"
                                         );
+                                        if tui {
+                                            fail.expect("failbar should have unwrapped").inc(1);
+                                            total.expect("totalbar should have unwrapped").inc(1);
+                                        }
                                         return;
                                     }
                                 };
 
                                 // return the pk for the metric name
-                                let metric_pk = match pk_get_pg_client
-                                    .lock()
-                                    .await
+                                let metric_pk = match pg_client
                                     .query(sql::GET_METRIC_PK, &[&metric_name])
                                     .await
                                 {
@@ -104,10 +176,20 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                                         error!(
                                             "failed to get metric_pk from metrics_lib, error({err})"
                                         );
+                                        if tui {
+                                            fail.expect("failbar should have unwrapped").inc(1);
+                                            total.expect("totalbar should have unwrapped").inc(1);
+                                        }
                                         return;
                                     }
                                 };
 
+                                drop(pg_client);
+
+                                spinner.set_message(format!(
+                                    "reformatting data for [{}] {}",
+                                    &ticker.ticker, &ticker.title
+                                ));
                                 for (_units, values) in dataset.units {
                                     for cell in values {
                                         metrics.push(Metric {
@@ -129,7 +211,22 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                 }
 
                 // insert into stock.metrics
-                let mut pg_client = pg_client.lock().await;
+                spinner.set_message(format!(
+                    "waiting to insert metrics for [{}] {}",
+                    &ticker.ticker, &ticker.title
+                ));
+                let mut pg_client = match pool.get().await {
+                    Ok(client) => client,
+                    Err(err) => {
+                        error!("failed to get pg client from pool, error({err})");
+                        if tui {
+                            fail.expect("failbar should have unwrapped").inc(1);
+                            total.expect("totalbar should have unwrapped").inc(1);
+                        }
+                        return;
+                    }
+                };
+
                 let query = pg_client
                     .prepare(sql::INSERT_METRIC)
                     .await
@@ -142,6 +239,10 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                             "failed to create transaction for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
+                        if tui {
+                            fail.expect("failbar should have unwrapped").inc(1);
+                            total.expect("totalbar should have unwrapped").inc(1);
+                        }
                         return;
                     }
                 };
@@ -151,12 +252,20 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     "inserting reformatted metric data for [{}] {}",
                     &ticker.ticker, &ticker.title
                 );
+                spinner.set_message(format!(
+                    "inserting metrics for [{}] {}",
+                    &ticker.ticker, &ticker.title
+                ));
                 let mut stream = stream::iter(metrics);
                 while let Some(metric) = stream.next().await {
                     let query = query.clone();
                     let transaction = transaction.clone();
                     let tkr = &ticker.ticker;
                     let title = &ticker.title;
+
+                    // progress bar
+                    let total = total.clone();
+                    let fail = fail.clone();
                     async move {
                         match transaction
                             .execute(
@@ -171,11 +280,17 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                             )
                             .await
                         {
-                            Ok(_) => trace!("inserted metric data for [{tkr}] {title}"),
+                            Ok(_) => {
+                                trace!("inserted metric data for [{tkr}] {title}");
+                            }
                             Err(err) => {
                                 error!(
                                     "failed to insert metric data for [{tkr}] {title}, error({err})"
                                 );
+                                if tui {
+                                    fail.expect("failbar should have unwrapped").inc(1);
+                                    total.expect("totalbar should have unwrapped").inc(1);
+                                }
                                 return;
                             }
                         }
@@ -195,9 +310,26 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
                     &ticker.title,
                     crate::time_elapsed(time)
                 );
+                if tui {
+                    success.expect("successbar should have unwrapped").inc(1);
+                    total.expect("totalbar should have unwrapped").inc(1);
+                }
             }
         })
         .await;
+
+    fail.expect("fail bar should have unwrapped")
+        .finish_and_clear();
+    success
+        .expect("success bar should have unwrapped")
+        .finish_and_clear();
+    total
+        .expect("total bar should have unwrapped")
+        .finish_and_clear();
+
+    if tui {
+        println!("collecting stock metrics ... done\n");
+    }
 
     Ok(())
 }

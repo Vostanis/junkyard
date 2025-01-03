@@ -1,18 +1,28 @@
 use crate::stock::common::de_cik;
 use crate::{http::*, stock::sql};
+use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::de::Visitor;
 use serde::Deserialize;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, error, trace};
 
 // scrape
 // ----------------------------------------------------------------------------
 
-pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
+pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     let client = build_client();
 
     debug!("fetching SEC Company Tickers");
+    if tui {
+        println!(
+            "{bar}\n{name:^40}\n{bar}",
+            bar = "=".repeat(40),
+            name = "SEC Tickers"
+        );
+    }
     let tickers: Tickers = client
         .get("https://www.sec.gov/files/company_tickers.json")
         .send()
@@ -27,7 +37,9 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
             error!("failed to parse JSON, error({err})");
             err
         })?;
-    tickers.insert(pg_client).await?;
+
+    let pg_client = &mut pool.get().await?;
+    tickers.insert(pg_client, tui).await?;
 
     Ok(())
 }
@@ -92,12 +104,30 @@ impl<'de> Deserialize<'de> for Tickers {
 }
 
 impl Tickers {
-    async fn insert(&self, pg_client: &mut PgClient) -> anyhow::Result<()> {
+    async fn insert(&self, pg_client: &mut PgClient, tui: bool) -> anyhow::Result<()> {
         let time = std::time::Instant::now();
 
         // preprocess pg query as transaction
         let query = pg_client.prepare(&sql::INSERT_TICKER).await?;
         let transaction = Arc::new(pg_client.transaction().await?);
+
+        // progress bar
+        let pb = if tui {
+            let pb = ProgressBar::new(self.0.len() as u64).with_style(
+                ProgressStyle::default_bar()
+                    .template(
+                        "{msg} {spinner:.magenta}\n\
+                        [{elapsed_precise:.magenta}] |{bar:40.cyan/blue}| {human_pos}/{human_len} \
+                        [Rate: {per_sec:.magenta}, ETA: {eta:.blue}]",
+                    )?
+                    .progress_chars("##-"),
+            );
+            pb.set_message("collecting tickers ...");
+            pb.enable_steady_tick(Duration::from_millis(100));
+            pb
+        } else {
+            ProgressBar::hidden()
+        };
 
         // iterate over the data stream and execute pg rows
         let mut stream = stream::iter(&self.0);
@@ -114,6 +144,8 @@ impl Tickers {
 
             let query = query.clone();
             let transaction = transaction.clone();
+
+            let pb = pb.clone();
             async move {
                 match transaction
                     .execute(
@@ -128,7 +160,10 @@ impl Tickers {
                     )
                     .await
                 {
-                    Ok(_) => trace!("stock tickers inserted"),
+                    Ok(_) => {
+                        trace!("stock tickers inserted");
+                        pb.inc(1)
+                    }
                     Err(err) => error!("failed to insert SEC Company Tickers, error({err})"),
                 }
             }
@@ -146,6 +181,12 @@ impl Tickers {
             })?;
 
         debug!("SEC stock tickers inserted. {}", crate::time_elapsed(time));
+
+        pb.finish_and_clear();
+
+        if tui {
+            println!("collecting tickers ... done\n");
+        }
 
         Ok(())
     }

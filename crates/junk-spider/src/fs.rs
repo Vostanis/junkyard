@@ -1,6 +1,8 @@
 use crate::http::*;
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::fs::File;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Mutex;
@@ -12,7 +14,12 @@ const CHUNK_SIZE: u64 = 100 * 1024 * 1024; // 100 MB
 /// the download process with [`rayon`].
 ///
 /// [`rayon`]: https://docs.rs/rayon/latest/rayon/
-pub async fn download_file(http_client: &HttpClient, url: &str, path: &str) -> anyhow::Result<()> {
+pub async fn download_file(
+    http_client: &HttpClient,
+    url: &str,
+    path: &str,
+    tui: bool,
+) -> anyhow::Result<()> {
     use reqwest::header::CONTENT_LENGTH;
 
     let client = http_client.clone();
@@ -33,6 +40,24 @@ pub async fn download_file(http_client: &HttpClient, url: &str, path: &str) -> a
         .ok_or_else(|| anyhow::anyhow!("failed to get directory path"))?;
     tokio::fs::create_dir_all(dir_path).await?;
 
+    // progress bar
+    let pb = if tui {
+        let pb = ProgressBar::new(file_size as u64).with_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{msg} {spinner:.magenta}\n\
+                    [{elapsed_precise:.magenta}] |{bar:40.cyan/blue}| {bytes}/{total_bytes} \
+                    [Rate: {bytes_per_sec:.magenta}, ETA: {eta:.blue}]",
+                )?
+                .progress_chars("##-"),
+        );
+        pb.set_message("preparing directory ...");
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    } else {
+        ProgressBar::hidden()
+    };
+
     // initialise central variables of async process
     let file = File::create(path).await?;
     let file = Arc::new(Mutex::new(file));
@@ -40,15 +65,20 @@ pub async fn download_file(http_client: &HttpClient, url: &str, path: &str) -> a
     let mut tasks = Vec::with_capacity(num_chunks as usize);
 
     // build each async task and push to variable `tasks`; each task downloading a chunk of data
+    pb.set_message(format!("downloading file from {url} to {path} ..."));
     for i in 0..num_chunks {
         let start = i * CHUNK_SIZE;
         let end = std::cmp::min((i + 1) * CHUNK_SIZE, file_size);
         let url = url.to_string();
         let file = file.clone();
         let client = client.clone();
+        let pb = pb.clone();
         tasks.push(tokio::spawn(async move {
             let mut file = file.lock().await;
-            let _chunk = download_chunk(&client, &url, start, end, &mut file).await;
+            match download_chunk(&client, &url, start, end, &mut file).await {
+                Ok(_) => pb.inc(end - start),
+                Err(e) => eprintln!("Error downloading chunk {}-{}: {}", start, end, e),
+            }
         }));
     }
 
@@ -56,6 +86,12 @@ pub async fn download_file(http_client: &HttpClient, url: &str, path: &str) -> a
     let mut outputs = Vec::with_capacity(tasks.len());
     for task in tasks {
         outputs.push(task.await.unwrap());
+    }
+
+    pb.finish_and_clear();
+
+    if tui {
+        println!("downloading file ... done");
     }
 
     Ok(())
@@ -91,7 +127,7 @@ pub async fn download_chunk(
 /// Reads a `.json` file from `path`.
 ///
 /// ```rust
-/// let ouput: DesiredType = renai_client::read_json(path).await?;
+/// let ouput: T = read_json(path).await?;
 /// ```
 pub async fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> anyhow::Result<T> {
     let file = tokio::fs::read(path).await?;
@@ -103,7 +139,7 @@ pub async fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> anyhow::Re
 ///
 /// `std::fs::create_dir_all(to_dir)?` is used in creating `to_dir` path,
 /// so directories will be created, as necessary, by the unzip() function.
-pub async fn unzip(zip_file: &str, to_dir: &str) -> anyhow::Result<()> {
+pub async fn unzip(zip_file: &str, to_dir: &str, tui: bool) -> anyhow::Result<()> {
     debug!("unzipping {zip_file} to {to_dir}");
 
     // use of rayon requires lots of async wrappings
@@ -115,11 +151,30 @@ pub async fn unzip(zip_file: &str, to_dir: &str) -> anyhow::Result<()> {
     let zip_length = archive.len();
     let archive = Arc::new(std::sync::Mutex::new(archive));
 
+    // progress bar
+    let pb = if tui {
+        let pb = ProgressBar::new(zip_length as u64).with_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{msg} {spinner:.magenta}\n\
+                    [{elapsed_precise:.magenta}] |{bar:40.cyan/blue}| {human_pos}/{human_len} files \
+                    [Rate: {per_sec:.magenta}, ETA: {eta:.blue}]",
+                )?
+                .progress_chars("##-"),
+        );
+        pb.set_message("unzipping file ...");
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    } else {
+        ProgressBar::hidden()
+    };
+
     // ensure the target directory exists
     tokio::fs::create_dir_all(to_dir).await?;
 
     // parallel iteration across zipped files
     (0..zip_length).into_par_iter().for_each(|i| {
+        let pb = pb.clone();
         let archive = archive.clone();
         let mut archive = archive.lock().expect("unlock zip archive");
         let mut file = archive.by_index(i).expect("file from zip archive");
@@ -127,17 +182,26 @@ pub async fn unzip(zip_file: &str, to_dir: &str) -> anyhow::Result<()> {
         let outdir = std::path::Path::new(&outpath)
             .parent()
             .expect("parent directory of output path");
+
+        // if output directory does not exist, create it
         if !outdir.exists() {
             std::fs::create_dir_all(&outdir).expect("failed to create directory");
         }
 
-        // fxtract the file
+        // extract the file
         let mut outfile = std::fs::File::create(&outpath).expect("creation of output file");
         trace!("copying {} to {}", file.name(), outpath);
         std::io::copy(&mut file, &mut outfile).expect("copying of zip file to output");
+        pb.inc(1);
     });
 
     info!("{zip_file} unzipped to {to_dir}");
+
+    pb.finish_and_clear();
+
+    if tui {
+        println!("unzipping file ... done")
+    }
 
     Ok(())
 }

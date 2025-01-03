@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 clap = { version = "4.5.23", features = ["derive"] }
+deadpool-postgres = "0.14.1"
 dotenv.workspace = true
 junk-spider = { version = "0.1.0", path = "../junk-spider" }
 tokio.workspace = true
