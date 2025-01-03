@@ -75,13 +75,15 @@ async fn main() -> anyhow::Result<()> {
             )?;
             debug!("findump connection pool established");
 
-            crypto::mexc::scrape(&pool, tui).await?;
-            crypto::kraken::scrape(&pool, tui).await?;
-            crypto::binance::scrape(&pool, tui).await?;
-            crypto::kucoin::scrape(&pool, tui).await?;
-            stock::sec::bulks::scrape(tui).await?;
+            // crypto::mexc::scrape(&pool, tui).await?;
+            // crypto::kraken::scrape(&pool, tui).await?;
+            // crypto::binance::scrape(&pool, tui).await?;
+            // crypto::kucoin::scrape(&pool, tui).await?;
+
+            stock::sec::tickers::scrape(&pool, tui).await?;
+            // stock::sec::bulks::scrape(tui).await?;
             // stock::yahoo_finance::scrape(&pool, tui).await?;
-            stock::sec::metrics::scrape(&pool, tui).await?;
+            // stock::sec::metrics::scrape(&pool, tui).await?;
         }
     }
 

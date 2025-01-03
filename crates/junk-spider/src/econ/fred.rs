@@ -1,12 +1,13 @@
 use super::sql;
 use crate::http::*;
 use crate::stock::common::convert_date_type;
+use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, error, trace};
 
-pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
+pub async fn scrape(pool: &Pool) -> anyhow::Result<()> {
     let http_client = crate::std_client_build();
 
     for dataset in ["Unemployment Rate", "Interest Rate"] {
@@ -21,12 +22,18 @@ pub async fn scrape(pg_client: &mut PgClient) -> anyhow::Result<()> {
 
         trace!("fetching Fred data {dataset}");
         let data: Observations = http_client.get(url).send().await?.json().await?;
+
+        // wait for pg client
+        let mut pg_client = pool.get().await?;
+
         trace!("inserting Fred data {dataset}");
-        data.insert(pg_client, &dataset).await?;
+        data.insert(&mut pg_client, &dataset).await?;
     }
 
     Ok(())
 }
+
+//////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Deserialize)]
 struct Observations {

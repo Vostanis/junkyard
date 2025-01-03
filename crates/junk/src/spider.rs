@@ -42,7 +42,7 @@ pub(crate) async fn run(endpoints: Vec<Endpoint>) -> anyhow::Result<()> {
             Endpoint::Econ => {
                 let time = std::time::Instant::now();
 
-                spider::econ::fred::scrape(&mut pg_client).await?;
+                // spider::econ::fred::scrape(&pool).await?;
 
                 info!(
                     "economic data collected, time elapsed: {:?}",
