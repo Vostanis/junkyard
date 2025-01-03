@@ -5,6 +5,7 @@ use futures::{stream, StreamExt};
 use serde::Deserialize;
 use std::fs::File;
 use std::io::Read;
+use tokio_postgres::types::Type;
 
 // read a json file to a string
 #[inline]
@@ -99,50 +100,173 @@ fn benchmark_transformation(c: &mut Criterion) {
 
 // load prices using INSERT statements
 #[inline]
-async fn load_prices_with_insert(prices: Vec<Price>) -> anyhow::Result<()> {
-    for price in prices {
-        println!("{:?}", price);
+async fn load_prices_with_insert(
+    pg_client: &mut tokio_postgres::Client,
+    prices: Vec<Price>,
+) -> anyhow::Result<()> {
+    // start a transaction
+    let query = pg_client.prepare("
+        INSERT INTO stock.prices (symbol_pk, dt, interval_pk, opening, high, low, closing, adj_close, volume)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (symbol_pk, dt, interval_pk) DO NOTHING
+    ").await?;
+    let tx = std::sync::Arc::new(pg_client.transaction().await?);
+
+    // iterate over the data stream and execute pg rows
+    let placeholder_pk = 999_998;
+    let mut stream = stream::iter(&prices);
+    while let Some(cell) = stream.next().await {
+        let query = query.clone();
+        let tx = tx.clone();
+
+        async move {
+            tx.execute(
+                &query,
+                &[
+                    &placeholder_pk,
+                    &cell.time,
+                    &cell.interval_pk,
+                    &cell.open,
+                    &cell.high,
+                    &cell.low,
+                    &cell.close,
+                    &cell.adj_close,
+                    &cell.volume,
+                ],
+            )
+            .await
+            .unwrap()
+        }
+        .await;
     }
+
+    // unpack the transcation and commit it to the database
+    std::sync::Arc::into_inner(tx)
+        .expect("failed to unpack Transaction from Arc")
+        .commit()
+        .await
+        .unwrap();
 
     Ok(())
 }
 
 // load prices using COPY statements
 #[inline]
-async fn load_prices_with_copy(prices: Vec<Price>) -> anyhow::Result<()> {
-    for price in prices {
-        println!("{:?}", price);
+async fn load_prices_with_copy(
+    pg_client: &mut tokio_postgres::Client,
+    prices: Vec<Price>,
+) -> anyhow::Result<()> {
+    // Start a transaction
+    let tx = pg_client.transaction().await?;
+
+    // Prepare the COPY statement
+    let copy_stmt = "
+        COPY stock.prices (symbol_pk, dt, interval_pk, opening, high, low, closing, adj_close, volume) 
+        FROM STDIN WITH (FORMAT binary)
+    ";
+
+    // Begin the COPY operation
+    let sink = tx.copy_in(copy_stmt).await?;
+
+    // vec![
+    //         &placeholder_pk,
+    //         &cell.time,
+    //         &cell.interval_pk,
+    //         &cell.open,
+    //         &cell.high,
+    //         &cell.low,
+    //         &cell.close,
+    //         &cell.adj_close,
+    //         &cell.volume,
+    // ];
+    let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(
+        sink,
+        &[
+            Type::INT4,
+            Type::TIMESTAMPTZ,
+            Type::INT2,
+            Type::FLOAT4,
+            Type::FLOAT4,
+            Type::FLOAT4,
+            Type::FLOAT4,
+            Type::FLOAT4,
+            Type::INT8,
+            Type::INT2,
+        ],
+    );
+    futures::pin_mut!(writer);
+
+    // Iterate over the data stream and write to the sink in binary format
+    let placeholder_pk = 999_999;
+    let mut stream = stream::iter(&prices);
+    while let Some(cell) = stream.next().await {
+        writer.as_mut().write(
+            &[
+                &placeholder_pk,
+                &cell.time,
+                &cell.interval_pk,
+                &cell.open,
+                &cell.high,
+                &cell.low,
+                &cell.close,
+                &cell.adj_close,
+                &cell.volume,
+            ]
+            .await
+            .unwrap(),
+        );
     }
+
+    writer.finish().await?;
+    tx.commit().await?;
 
     Ok(())
 }
 
-fn benchmark_loading(c: &mut Criterion) {
+async fn benchmark_loading(c: &mut Criterion) {
     let path = format!("./benches/files/prices.json");
     let file_contents = read_file_to_string(path);
     let prices: PriceResponse = de_prices(file_contents);
+    let prices = tr_prices(prices).await.unwrap();
 
+    // open a connection
+    let (mut pg_client, pg_conn) = tokio_postgres::connect(
+        &dotenv::var("FINDUMP_URL").expect("environment variable FINDUMP_URL"),
+        tokio_postgres::NoTls,
+    )
+    .await
+    .unwrap();
+
+    // hold the connection
+    tokio::spawn(async move { if let Err(_err) = pg_conn.await {} });
+
+    // benches
     c.bench_function("load prices with INSERT", |b| {
         b.iter(|| {
-            let _transformed_prices = tr_prices(black_box(prices.clone()));
+            let _insert_load = load_prices_with_insert(&mut pg_client, black_box(prices.clone()));
         })
     });
 
-    c.bench_function("load prices with COPY", |b| {
-        b.iter(|| {
-            let _transformed_prices = tr_prices(black_box(prices.clone()));
-        })
-    });
+    // c.bench_function("load prices with COPY", |b| {
+    //     b.iter(|| {
+    //         let _copy_load = load_prices_with_copy(&mut pg_client, black_box(prices.clone()));
+    //     })
+    // });
 }
 
-criterion_group!(benches, benchmark_deserialization, benchmark_transformation);
+criterion_group!(
+    benches,
+    benchmark_deserialization,
+    benchmark_transformation,
+    benchmark_loading
+);
 criterion_main!(benches);
 
 ////////////////////////////////////////////////////////////////////
 
 // Output cell
 // ----------------------------------------------------------
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Price {
     #[allow(dead_code)]
     stock_pk: i32,

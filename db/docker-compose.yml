@@ -12,5 +12,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  test_postgres:
+    image: postgres:17.2
+    container_name: junkyard_test
+    restart: always
+    environment:
+      POSTGRES_USER: test_admin
+      POSTGRES_PASSWORD: test_changeme
+      POSTGRES_DB: test_findump
+    ports:
+      - "5433:5432"
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+
 volumes:
   postgres_data:
