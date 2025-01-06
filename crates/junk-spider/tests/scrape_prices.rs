@@ -1,4 +1,4 @@
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use dotenv::var;
 use futures::{stream, StreamExt};
 use junk_spider::http::PgClient;
@@ -8,6 +8,8 @@ use std::sync::Arc;
 use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{self as pg, NoTls};
+
+const PLACEHOLDER_PK: i32 = 1_000_000;
 
 #[tokio::test]
 async fn scrape_prices() {
@@ -54,7 +56,7 @@ async fn scrape_prices() {
         .then(
             |((((((open, high), low), close), volume), adj_close), timestamp)| async move {
                 Price {
-                    stock_pk: 999_999,
+                    stock_pk: PLACEHOLDER_PK,
                     time: DateTime::from_timestamp(*timestamp, 0).unwrap(),
                     interval_pk: 3,
                     open: *open,
@@ -115,9 +117,13 @@ async fn scrape_prices() {
         .unwrap();
     println!("CREATE TABLE: {:?}s", time.elapsed().as_secs_f64());
 
+    let midpoint = prices.len() / 2;
+
     // -- INSERT INTO POSTGRES --
     let time = std::time::Instant::now();
-    insert(prices.clone(), &mut pg_client).await.unwrap();
+    insert(prices[..midpoint].to_vec(), &mut pg_client)
+        .await
+        .unwrap();
     println!("INSERT test.prices: {:?}s", time.elapsed().as_secs_f64());
 
     // -- TRUNCATE TABLE IN POSTGRES --
@@ -128,26 +134,19 @@ async fn scrape_prices() {
         .unwrap();
     println!("TRUNCATE TABLE: {:?}s", time.elapsed().as_secs_f64());
 
-    // -- COPY INTO POSTGRES --
+    // -- SELECT ALL PRIMARY KEYS FROM THE ACTUAL stock.prices --
     let time = std::time::Instant::now();
-    copy(prices.clone(), &mut pg_client).await.unwrap();
-    println!("COPY test.prices: {:?}s", time.elapsed().as_secs_f64());
-
-    // -- SELECT ALL PRIMARY KEYS --
-    let time = std::time::Instant::now();
-    let rows = pg_client
+    let exists: Set<PricePrimaryKey> = pg_client
         .query(
             "
-            SELECT symbol_pk, dt, interval_pk FROM stock.prices p 
-            INNER JOIN stock.tickers t ON t.pk = p.symbol_pk
-            WHERE t.ticker = $1
+            SELECT p.symbol_pk, p.dt, p.interval_pk FROM stock.prices p 
+            --INNER JOIN stock.tickers t ON t.pk = p.symbol_pk
+            WHERE p.symbol_pk = $1
         ",
-            &[&"MSFT"],
+            &[&PLACEHOLDER_PK],
         )
         .await
-        .unwrap();
-
-    let all: Set<PricePrimaryKey> = rows
+        .unwrap()
         .iter()
         .map(|row| PricePrimaryKey {
             stock_pk: row.get(0),
@@ -155,29 +154,34 @@ async fn scrape_prices() {
             interval_pk: row.get(2),
         })
         .collect();
-
     println!(
         "SELECT *: {:?}s, count: {}",
         time.elapsed().as_secs_f64(),
-        all.len()
+        exists.len()
     );
 
+    // -- FILTER EXISTING FROM COLLECTED --
+    let time = std::time::Instant::now();
     let filtered_prices: Vec<_> = prices
         .into_iter()
         .filter(|cell| {
-            !existing_set.contains(&Price {
-                symbol_pk: cell.symbol_pk,
+            !exists.contains(&PricePrimaryKey {
+                stock_pk: cell.stock_pk,
                 time: cell.time,
                 interval_pk: cell.interval_pk,
-                open: cell.open,
-                high: cell.high,
-                low: cell.low,
-                close: cell.close,
-                adj_close: cell.adj_close,
-                volume: cell.volume,
             })
         })
         .collect();
+    println!(
+        "filtered prices: {:?}s, count: {}",
+        time.elapsed().as_secs_f64(),
+        filtered_prices.len()
+    );
+
+    // -- COPY FILTERED INTO POSTGRES --
+    let time = std::time::Instant::now();
+    copy(filtered_prices.clone(), &mut pg_client).await.unwrap();
+    println!("COPY test.prices: {:?}s", time.elapsed().as_secs_f64());
 
     // -- REMOVE TABLE IN POSTGRES --
     let time = std::time::Instant::now();
@@ -195,7 +199,7 @@ async fn scrape_prices() {
 struct Price {
     #[allow(dead_code)]
     stock_pk: i32,
-    time: chrono::DateTime<chrono::Utc>,
+    time: DateTime<Utc>,
     interval_pk: i16,
     open: f64,
     high: f64,
@@ -203,6 +207,13 @@ struct Price {
     close: f64,
     adj_close: f64,
     volume: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PricePrimaryKey {
+    stock_pk: i32,
+    time: DateTime<Utc>,
+    interval_pk: i16,
 }
 
 // -- DESERIALIZATION --
@@ -259,12 +270,11 @@ async fn insert(prices: Vec<Price>, pg_client: &mut PgClient) -> anyhow::Result<
     while let Some(cell) = stream.next().await {
         let query = query.clone();
         let tx = tx.clone();
-        let pk = 999_999;
         async move {
             tx.execute(
                 &query,
                 &[
-                    &pk,
+                    &PLACEHOLDER_PK,
                     &cell.time,
                     &cell.interval_pk,
                     &cell.open,
@@ -298,13 +308,12 @@ async fn copy(prices: Vec<Price>, pg_client: &mut PgClient) -> anyhow::Result<()
 
     // Prepare the COPY statement
     let copy_stmt = "
-        COPY test.prices (symbol_pk, dt, interval_pk, opening, high, low, closing, adj_close, volume) 
+        COPY stock.prices (symbol_pk, dt, interval_pk, opening, high, low, closing, adj_close, volume) 
         FROM STDIN WITH (FORMAT binary)
     ";
 
     // Begin the COPY operation
     let sink = tx.copy_in(copy_stmt).await?;
-
     let writer = BinaryCopyInWriter::new(
         sink,
         &[
@@ -322,13 +331,12 @@ async fn copy(prices: Vec<Price>, pg_client: &mut PgClient) -> anyhow::Result<()
     futures::pin_mut!(writer);
 
     // Iterate over the data stream and write to the sink in binary format
-    let placeholder_pk = 1_000_000;
     let mut stream = stream::iter(&prices);
     while let Some(cell) = stream.next().await {
         writer
             .as_mut()
             .write(&[
-                &placeholder_pk as &(dyn ToSql + Sync),
+                &PLACEHOLDER_PK as &(dyn ToSql + Sync),
                 &cell.time as &(dyn ToSql + Sync),
                 &cell.interval_pk as &(dyn ToSql + Sync),
                 &cell.open as &(dyn ToSql + Sync),
@@ -341,16 +349,8 @@ async fn copy(prices: Vec<Price>, pg_client: &mut PgClient) -> anyhow::Result<()
             .await
             .unwrap();
     }
-
     writer.finish().await?;
     tx.commit().await?;
 
     Ok(())
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-struct PricePrimaryKey {
-    stock_pk: i32,
-    time: chrono::DateTime<chrono::Utc>,
-    interval_pk: i16,
 }
