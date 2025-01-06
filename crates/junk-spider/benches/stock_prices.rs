@@ -5,7 +5,7 @@ use futures::{stream, StreamExt};
 use serde::Deserialize;
 use std::fs::File;
 use std::io::Read;
-use tokio_postgres::types::Type;
+use tokio_postgres::types::{ToSql, Type};
 
 // read a json file to a string
 #[inline]
@@ -191,7 +191,6 @@ async fn load_prices_with_copy(
             Type::FLOAT4,
             Type::FLOAT4,
             Type::INT8,
-            Type::INT2,
         ],
     );
     futures::pin_mut!(writer);
@@ -200,21 +199,21 @@ async fn load_prices_with_copy(
     let placeholder_pk = 999_999;
     let mut stream = stream::iter(&prices);
     while let Some(cell) = stream.next().await {
-        writer.as_mut().write(
-            &[
-                &placeholder_pk,
-                &cell.time,
-                &cell.interval_pk,
-                &cell.open,
-                &cell.high,
-                &cell.low,
-                &cell.close,
-                &cell.adj_close,
-                &cell.volume,
-            ]
+        writer
+            .as_mut()
+            .write(&[
+                &placeholder_pk as &(dyn ToSql + Sync),
+                &cell.time as &(dyn ToSql + Sync),
+                &cell.interval_pk as &(dyn ToSql + Sync),
+                &cell.open as &(dyn ToSql + Sync),
+                &cell.high as &(dyn ToSql + Sync),
+                &cell.low as &(dyn ToSql + Sync),
+                &cell.close as &(dyn ToSql + Sync),
+                &cell.adj_close as &(dyn ToSql + Sync),
+                &cell.volume as &(dyn ToSql + Sync),
+            ])
             .await
-            .unwrap(),
-        );
+            .unwrap();
     }
 
     writer.finish().await?;
@@ -223,6 +222,7 @@ async fn load_prices_with_copy(
     Ok(())
 }
 
+use criterion::async_executor::FuturesExecutor;
 async fn benchmark_loading(c: &mut Criterion) {
     let path = format!("./benches/files/prices.json");
     let file_contents = read_file_to_string(path);
@@ -230,7 +230,7 @@ async fn benchmark_loading(c: &mut Criterion) {
     let prices = tr_prices(prices).await.unwrap();
 
     // open a connection
-    let (mut pg_client, pg_conn) = tokio_postgres::connect(
+    let (pg_client, pg_conn) = tokio_postgres::connect(
         &dotenv::var("FINDUMP_URL").expect("environment variable FINDUMP_URL"),
         tokio_postgres::NoTls,
     )
@@ -241,9 +241,10 @@ async fn benchmark_loading(c: &mut Criterion) {
     tokio::spawn(async move { if let Err(_err) = pg_conn.await {} });
 
     // benches
-    c.bench_function("load prices with INSERT", |b| {
-        b.iter(|| {
-            let _insert_load = load_prices_with_insert(&mut pg_client, black_box(prices.clone()));
+    let pg_clone = pg_client.clone();
+    c.bench_function("load prices with INSERT", move |b| {
+        b.to_async(FuturesExecutor).iter(|| async {
+            load_prices_with_insert(&mut pg_client, black_box(prices.clone())).await
         })
     });
 
@@ -254,12 +255,7 @@ async fn benchmark_loading(c: &mut Criterion) {
     // });
 }
 
-criterion_group!(
-    benches,
-    benchmark_deserialization,
-    benchmark_transformation,
-    benchmark_loading
-);
+criterion_group!(benches, benchmark_deserialization, benchmark_transformation,);
 criterion_main!(benches);
 
 ////////////////////////////////////////////////////////////////////

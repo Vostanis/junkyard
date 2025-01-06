@@ -125,10 +125,6 @@ pub async fn download_chunk(
 }
 
 /// Reads a `.json` file from `path`.
-///
-/// ```rust
-/// let ouput: T = read_json(path).await?;
-/// ```
 pub async fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> anyhow::Result<T> {
     let file = tokio::fs::read(path).await?;
     let data: T = serde_json::from_slice(&file)?;

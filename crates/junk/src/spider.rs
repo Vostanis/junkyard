@@ -1,6 +1,6 @@
 use crate::cli::Endpoint;
 use dotenv::var;
-use junk_spider as spider;
+// use junk_spider as spider;
 use tokio_postgres::{self as pg, NoTls};
 use tracing::{debug, error, info, trace};
 
