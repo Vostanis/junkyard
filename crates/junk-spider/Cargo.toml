@@ -26,6 +26,8 @@ tokio-postgres.workspace = true
 tracing.workspace = true
 zip = "2.2.2"
 num_cpus.workspace = true
+bimap = "0.6.3"
+num = "0.4.3"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_futures"] }

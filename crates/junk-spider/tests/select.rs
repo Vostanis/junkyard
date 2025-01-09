@@ -1,6 +1,8 @@
 use dotenv::var;
-use std::collections::HashSet as Set;
+use std::collections::{HashMap as Map, HashSet as Set};
 use tokio_postgres::{self as pg, NoTls};
+
+// Time recordings for various SELECT statements.
 
 #[tokio::test]
 async fn select_pks() {
@@ -66,24 +68,30 @@ async fn select_pks() {
         .collect();
 
     println!(
-        "SELECT *: {:?}s, count: {}",
+        "SELECT key FROM stock.prices: {:?}s, count: {}",
         time.elapsed().as_secs_f64(),
         all.len()
     );
-}
 
-// -- DESERIALIZATION --
-#[derive(Clone, Debug)]
-struct Price {
-    stock_pk: i32,
-    time: chrono::DateTime<chrono::Utc>,
-    interval_pk: i16,
-    open: f64,
-    high: f64,
-    low: f64,
-    close: f64,
-    adj_close: f64,
-    volume: i64,
+    // -- SELECT * FROM stock.metrics_lib --
+    let time = std::time::Instant::now();
+    let metrics: Map<String, i32> = pg_client
+        .query(
+            "
+            SELECT pk, metric FROM stock.metrics_lib m
+        ",
+            &[],
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(1), row.get(0)))
+        .collect();
+    println!(
+        "SELECT pk, metric FROM stock.metrics_lib: {:?}s, count: {}",
+        time.elapsed().as_secs_f64(),
+        metrics.len()
+    );
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]

@@ -350,7 +350,7 @@ struct Ticker {
 
 // [
 //      {
-//          "dated": "2021-01-01",      # types | rust: NaiveDate -> postgres: DATE
+//          "dated": "2021-01-01",
 //          "metric": "Revenues",
 //          "val": "213123123123"
 //      },
