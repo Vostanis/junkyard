@@ -101,8 +101,12 @@ CREATE TABLE IF NOT EXISTS stock.metrics (
 	metric_pk INT NOT NULL,
 	acc_pk INT NOT NULL,
 	dated DATE NOT NULL,
+	year SMALLINT,
+	period CHAR(2),
+	form VARCHAR,
 	val FLOAT NOT NULL,
-	PRIMARY KEY (symbol_pk, metric_pk, acc_pk, dated, val)
+	accn VARCHAR,
+	PRIMARY KEY (symbol_pk, metric_pk, acc_pk, dated, val, accn)
 );
 CREATE INDEX IF NOT EXISTS idx_symbol_pk ON stock.metrics(symbol_pk);
 CREATE INDEX IF NOT EXISTS idx_dated ON stock.metrics(dated);

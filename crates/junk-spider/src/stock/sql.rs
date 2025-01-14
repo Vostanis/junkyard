@@ -38,7 +38,7 @@ pub(crate) static INSERT_METRIC: &'static str = "
 ";
 
 pub(crate) static COPY_METRIC: &'static str = "
-    COPY stock.metrics (symbol_pk, metric_pk, acc_pk, dated, val)
+    COPY stock.metrics (symbol_pk, metric_pk, acc_pk, dated, year, period, form, val, accn)
     FROM STDIN WITH (FORMAT binary)
 ";
 

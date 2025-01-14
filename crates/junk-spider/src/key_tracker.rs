@@ -214,6 +214,14 @@ async fn full_pg_process() {
         KeyTracker::<i32, String>::pg_fetch(&mut pg_client, "SELECT key, value FROM test_pks")
             .await;
     assert_eq!(tracker.see_next_key(), &2);
+
+    tracker
+        .pg_insert(
+            &mut pg_client,
+            "INSERT INTO test_pks (key, value) VALUES ($1, $2)
+            ON CONFLICT (key) DO NOTHING",
+        )
+        .await;
 }
 
 #[tokio::test]

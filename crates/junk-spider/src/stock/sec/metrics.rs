@@ -1,3 +1,4 @@
+use crate::http::*;
 use crate::key_tracker::KeyTracker;
 use crate::stock::common::convert_date_type;
 use crate::stock::sql;
@@ -11,6 +12,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
+use tokio_postgres::binary_copy::BinaryCopyInWriter;
+use tokio_postgres::types::Type;
 use tracing::{debug, error, info, trace};
 
 // scrape
@@ -41,7 +44,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     };
     info!("fetching stock.tickers ...");
     let tickers: Vec<Ticker> = pg_client
-        .query("SELECT pk, cik, ticker, title FROM stock.tickers", &[])
+        .query(
+            "SELECT pk, file_code, symbol, title FROM stock.symbols",
+            &[],
+        )
         .await
         .map_err(|err| {
             error!("failed to fetch stock.tickers, error({err})");
@@ -186,7 +192,11 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                                                                 .expect(
                                                                     "failed to convert date type",
                                                                 ),
+                                                            year: cell.fy,
+                                                            period: cell.fp,
+                                                            form: cell.form,
                                                             val: OrderedFloat(cell.val),
+                                                            accn: cell.accn,
                                                         });
                                                     }
                                                 }
@@ -219,10 +229,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                 };
 
                 // get the pre-existing data, and remove it from the set
-                let exists: HashSet<Metric> = pg_client
+                let exists: HashSet<MetricPrimaryKey> = pg_client
                     .query(
                         "
-                        SELECT symbol_pk, metric_pk, acc_pk, dated, val FROM stock.metrics
+                        SELECT symbol_pk, metric_pk, acc_pk, dated, val, accn FROM stock.metrics
                         WHERE symbol_pk = $1
                     ",
                         &[&ticker.pk],
@@ -230,12 +240,13 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     .await
                     .expect("failed to fetch existing metrics")
                     .iter()
-                    .map(|row| Metric {
+                    .map(|row| MetricPrimaryKey {
                         symbol_pk: row.get(0),
                         metric_pk: row.get(1),
                         acc_pk: row.get(2),
                         dated: row.get(3),
                         val: OrderedFloat(row.get(4)),
+                        accn: row.get(5),
                     })
                     .collect();
 
@@ -243,7 +254,16 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     .expect("failed to unwrap tbl")
                     .into_inner()
                     .into_iter()
-                    .filter(|row| !exists.contains(row))
+                    .filter(|row| {
+                        !exists.contains(&MetricPrimaryKey {
+                            symbol_pk: row.symbol_pk,
+                            metric_pk: row.metric_pk,
+                            acc_pk: row.acc_pk,
+                            dated: row.dated,
+                            val: row.val,
+                            accn: row.accn.clone(),
+                        })
+                    })
                     .collect();
 
                 drop(exists);
@@ -297,6 +317,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         .expect("total bar should have unwrapped")
         .finish_and_clear();
 
+    if tui {
+        println!("collecting stock metrics ... done");
+    }
+
     let mut pg_client = pool.get().await?;
 
     Arc::into_inner(stds)
@@ -304,21 +328,26 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         .into_inner()
         .pg_insert(
             &mut pg_client,
-            "INSERT INTO stock.acc_stds (pk, accounting) VALUES ($1, $2)",
+            "INSERT INTO stock.acc_stds (pk, accounting) VALUES ($1, $2)
+            ON CONFLICT DO NOTHING",
         )
         .await;
+    if tui {
+        println!("inserted accounting standards");
+    }
 
     Arc::into_inner(metrics)
         .expect("failed to unwrap metrics")
         .into_inner()
         .pg_insert(
             &mut pg_client,
-            "INSERT INTO stock.metrics_lib (pk, metric) VALUES ($1, $2)",
+            "INSERT INTO stock.metrics_lib (pk, metric) VALUES ($1, $2)
+            ON CONFLICT DO NOTHING",
         )
         .await;
 
     if tui {
-        println!("collecting stock metrics ... done\n");
+        println!("inserted metric names\n");
     }
 
     Ok(())
@@ -352,12 +381,24 @@ struct Metric {
     metric_pk: i32,
     acc_pk: i32,
     dated: chrono::NaiveDate,
+    year: Option<i16>,
+    period: Option<String>,
+    form: Option<String>,
     val: OrderedFloat<f64>,
+    accn: String,
 }
 
-use crate::http::*;
-use tokio_postgres::binary_copy::BinaryCopyInWriter;
-use tokio_postgres::types::Type;
+struct MetricVisitor;
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+struct MetricPrimaryKey {
+    symbol_pk: i32,
+    metric_pk: i32,
+    acc_pk: i32,
+    dated: chrono::NaiveDate,
+    val: OrderedFloat<f64>,
+    accn: String,
+}
 
 /// Execute the COPY statement, inserting the data into the database.
 ///
@@ -371,7 +412,17 @@ async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::
     let sink = tx.copy_in(sql::COPY_METRIC).await?;
     let writer = BinaryCopyInWriter::new(
         sink,
-        &[Type::INT4, Type::INT4, Type::INT4, Type::DATE, Type::FLOAT8],
+        &[
+            Type::INT4,
+            Type::INT4,
+            Type::INT4,
+            Type::DATE,
+            Type::INT2,
+            Type::BPCHAR,
+            Type::VARCHAR,
+            Type::FLOAT8,
+            Type::VARCHAR,
+        ],
     );
     futures::pin_mut!(writer);
 
@@ -383,7 +434,11 @@ async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::
                 &x.metric_pk,
                 &x.acc_pk,
                 &x.dated as &(dyn tokio_postgres::types::ToSql + Sync),
+                &x.year,
+                &x.period,
+                &x.form,
                 &x.val.into_inner(),
+                &x.accn,
             ])
             .await
         {
@@ -430,6 +485,10 @@ struct DataCell {
     //                ^^^ "end" is a keyword in PostgreSQL, so it's renamed to "dated"
     dated: String,
     val: f64,
+    fy: Option<i16>,
+    fp: Option<String>,
+    form: Option<String>,
+    accn: String,
 }
 //                          {
 //                              "end":"2009-06-30",
