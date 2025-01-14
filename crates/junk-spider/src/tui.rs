@@ -51,3 +51,16 @@ pub(crate) fn multi_progress(
 
     Ok((Some(multi), Some(total), Some(success), Some(fails)))
 }
+
+pub(crate) fn multi_progress_spinner(multi: Option<MultiProgress>, msg: String) -> ProgressBar {
+    match multi {
+        Some(m) => m.add(
+            ProgressBar::new_spinner().with_message(msg).with_style(
+                ProgressStyle::default_spinner()
+                    .template("\t   > {msg}")
+                    .expect("failed to set spinner style"),
+            ),
+        ),
+        None => ProgressBar::hidden(),
+    }
+}

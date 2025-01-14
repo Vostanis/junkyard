@@ -142,15 +142,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     trace!("fetching prices for {}", symbol);
 
                     // if tui is enabled, create a progress bar, per task currently being executed
-                    let spinner = multi.unwrap_or_default().add(
-                        ProgressBar::new_spinner()
-                            .with_message(format!("fetching prices for {symbol}"))
-                            .with_style(
-                                ProgressStyle::default_spinner()
-                                    .template("\t   > {msg}")
-                                    .expect("failed to set spinner style"),
-                            ),
-                    );
+                    let spinner = crate::tui::multi_progress_spinner(multi, format!("fetching prices for {symbol}"));
                     spinner.enable_steady_tick(Duration::from_millis(50));
 
                     let url = format!(

@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS stock.tickers (
 CREATE INDEX IF NOT EXISTS idx_ticker ON stock.tickers(ticker);
 CREATE INDEX IF NOT EXISTS idx_nation ON stock.tickers(nation);
 
+-- ticker list
+CREATE TABLE IF NOT EXISTS stock.symbols (
+	pk SERIAL,
+	symbol VARCHAR NOT NULL,
+	title VARCHAR NOT NULL,
+	industry VARCHAR,
+	file_code CHAR(10),
+	nation CHAR(4) NOT NULL,
+	PRIMARY KEY (symbol, title, nation, industry)
+);
+CREATE INDEX IF NOT EXISTS idx_symbol ON stock.symbols(symbol);
+CREATE INDEX IF NOT EXISTS idx_title ON stock.symbols(title);
+
 -- prices value table
 CREATE TABLE IF NOT EXISTS stock.prices (
 	symbol_pk INT,
@@ -81,9 +94,6 @@ CREATE TABLE IF NOT EXISTS stock.prices (
 	volume BIGINT,
 	PRIMARY KEY (symbol_pk, interval_pk, dt)
 );
-CREATE INDEX IF NOT EXISTS idx_symbol_pk ON stock.prices(symbol_pk);
-CREATE INDEX IF NOT EXISTS idx_interval_pk ON stock.prices(interval_pk);
-CREATE INDEX IF NOT EXISTS idx_dt ON stock.prices(dt);
 
 -- metrics value table
 CREATE TABLE IF NOT EXISTS stock.metrics (

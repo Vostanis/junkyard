@@ -140,7 +140,6 @@ async fn scrape_prices() {
         .query(
             "
             SELECT p.symbol_pk, p.dt, p.interval_pk FROM stock.prices p 
-            --INNER JOIN stock.tickers t ON t.pk = p.symbol_pk
             WHERE p.symbol_pk = $1
         ",
             &[&PLACEHOLDER_PK],

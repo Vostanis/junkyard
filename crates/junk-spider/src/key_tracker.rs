@@ -37,8 +37,8 @@ use tokio_postgres::types::{FromSql, ToSql};
 #[derive(Debug)]
 pub struct KeyTracker<PK, Obj>
 where
-    PK: Eq + PartialEq + Hash + PrimInt + for<'a> FromSql<'a> + ToSql + AddAssign,
-    Obj: Eq + PartialEq + Hash + for<'a> FromSql<'a> + ToSql,
+    PK: Eq + PartialEq + Hash + PrimInt + for<'a> FromSql<'a> + AddAssign,
+    Obj: Eq + PartialEq + Hash + for<'a> FromSql<'a>,
 {
     pub bimap: BiMap<PK, Obj>,
     pub next_key: PK,
@@ -46,11 +46,11 @@ where
 
 impl<PK, Obj> KeyTracker<PK, Obj>
 where
-    PK: Eq + PartialEq + Hash + PrimInt + for<'a> FromSql<'a> + ToSql + AddAssign,
-    Obj: Eq + PartialEq + Hash + for<'a> FromSql<'a> + ToSql,
+    PK: Eq + PartialEq + Hash + PrimInt + for<'a> FromSql<'a> + ToSql + AddAssign + Sync,
+    Obj: Eq + PartialEq + Hash + for<'a> FromSql<'a> + ToSql + Sync,
 {
     /// Retrieve a KeyTracker from a PostgreSQL query.
-    pub async fn pg_fetch(pg_client: PgClient, stmt: &str, key_col: &str, val_col: &str) -> Self {
+    pub async fn pg_fetch(pg_client: &mut PgClient, stmt: &str) -> Self {
         //retrieve a BiMap from a pg query
         let bimap: BiMap<PK, Obj> = pg_client
             .query(stmt, &[])
@@ -58,8 +58,8 @@ where
             .expect("Failed to fetch key map")
             .into_iter()
             .map(|row| {
-                let key: PK = row.get(key_col);
-                let value: Obj = row.get(val_col);
+                let key: PK = row.get(0);
+                let value: Obj = row.get(1);
                 (key, value)
             })
             .collect();
@@ -73,8 +73,26 @@ where
         }
     }
 
-    /// Retrieve a KeyTracker from a SQLite query.
-    // pub async sqlite_fetch() {}
+    /// Insert a KeyTracker into a PostgreSQL table, synchronously.
+    pub async fn pg_insert(&self, pg_client: &mut PgClient, stmt: &str) {
+        let query = pg_client
+            .prepare(stmt)
+            .await
+            .expect("failed to prepare statement");
+
+        let tx = pg_client
+            .transaction()
+            .await
+            .expect("failed to start a TRANSACTION");
+
+        for (key, value) in self.bimap.iter() {
+            tx.execute(&query, &[&key, &value])
+                .await
+                .expect("failed to insert into table");
+        }
+
+        tx.commit().await.expect("failed to commit TRANSACTION");
+    }
 
     /// Turn a BiMap into a `KeyTracker`.
     ///
@@ -165,7 +183,7 @@ async fn full_pg_process() {
     dotenv::dotenv().ok();
 
     // open a connection to the database, using Env Var
-    let (pg_client, pg_conn) =
+    let (mut pg_client, pg_conn) =
         tokio_postgres::connect(&dotenv::var("FINDUMP_URL").unwrap(), tokio_postgres::NoTls)
             .await
             .unwrap();
@@ -192,13 +210,9 @@ async fn full_pg_process() {
         .unwrap();
 
     // fetch the temp table
-    let tracker = KeyTracker::<i32, String>::pg_fetch(
-        pg_client,
-        "SELECT key, value FROM test_pks",
-        "key",
-        "value",
-    )
-    .await;
+    let tracker =
+        KeyTracker::<i32, String>::pg_fetch(&mut pg_client, "SELECT key, value FROM test_pks")
+            .await;
     assert_eq!(tracker.see_next_key(), &2);
 }
 

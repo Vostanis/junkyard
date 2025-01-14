@@ -133,7 +133,6 @@ impl Tickers {
         let mut stream = stream::iter(&self.0);
         while let Some(cell) = stream.next().await {
             let path = format!("./buffer/submissions/CIK{}.json", cell.cik);
-            trace!("reading file at path: \"{path}\"");
             let file: Sic = match crate::fs::read_json(&path).await {
                 Ok(data) => data,
                 Err(err) => {

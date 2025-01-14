@@ -33,6 +33,8 @@ pub async fn download_file(
         .and_then(|len| len.parse::<u64>().ok())
         .unwrap_or(0);
 
+    println!("{file_size}");
+
     // ensure the directory exists
     trace!("checking directory path: {:?}", path);
     let dir_path = std::path::Path::new(path)
@@ -76,7 +78,7 @@ pub async fn download_file(
         tasks.push(tokio::spawn(async move {
             let mut file = file.lock().await;
             match download_chunk(&client, &url, start, end, &mut file).await {
-                Ok(_) => pb.inc(end - start),
+                Ok(_) => pb.inc(CHUNK_SIZE),
                 Err(e) => eprintln!("Error downloading chunk {}-{}: {}", start, end, e),
             }
         }));
@@ -116,6 +118,14 @@ pub async fn download_chunk(
         .send()
         .await?;
 
+    // Ensure the response status is 206 Partial Content
+    if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Err(anyhow::anyhow!(
+            "Failed to download chunk: expected 206 Partial Content, got {}",
+            response.status()
+        ));
+    }
+
     // seek the position of bytes and write to the file
     let body = response.bytes().await?;
     let _seek = output_file.seek(tokio::io::SeekFrom::Start(start)).await?;
@@ -126,7 +136,9 @@ pub async fn download_chunk(
 
 /// Reads a `.json` file from `path`.
 pub async fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> anyhow::Result<T> {
+    trace!("reading file path: {path}");
     let file = tokio::fs::read(path).await?;
+    trace!("file read; deserializing bytes ...");
     let data: T = serde_json::from_slice(&file)?;
     Ok(data)
 }
