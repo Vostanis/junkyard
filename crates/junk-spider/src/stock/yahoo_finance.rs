@@ -29,10 +29,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     }
     info!("fetching stock.tickers ...");
     let tickers: Vec<Ticker> = pg_client
-        .query("SELECT pk, ticker, title FROM stock.tickers", &[])
+        .query("SELECT pk, symbol, title FROM stock.symbols", &[])
         .await
         .map_err(|err| {
-            error!("failed to fetch stock.tickers, error({err})");
+            error!("failed to fetch stock.symbols, error({err})");
             err
         })?
         .into_par_iter()
@@ -55,7 +55,9 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         let total = multi.add(
             ProgressBar::new(num as u64).with_style(
                 ProgressStyle::default_bar()
-                    .template("collecting stock prices ... {spinner:.magenta}\n {msg:>9.white} |{bar:57.white/grey}| {pos:<2} / {human_len} ({percent_precise}%) [Time: {elapsed}, Rate: {per_sec}, ETA: {eta}]")?
+                    .template("collecting stock prices ... {spinner:.magenta}\n \
+                        {msg:>9.white} |{bar:57.white/grey}| {pos:<2} / {human_len} ({percent_precise}%)\
+                        [Time: {elapsed}, Rate: {per_sec}, ETA: {eta}]")?
                     .progress_chars("## "),
             ),
         );
@@ -281,7 +283,11 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         .finish_and_clear();
     total
         .expect("total bar should have unwrapped")
-        .finish_with_message("collecting stock prices ... done [{elapsed:.magenta}]\n");
+        .finish_and_clear();
+
+    if tui {
+        println!("collecting stock prices ... done")
+    }
 
     Ok(())
 }

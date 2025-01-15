@@ -9,9 +9,9 @@ use std::collections::HashMap;
 /// `stock.tickers` is the master table for stock tickers, their title, industry labels, and their
 /// nation.
 pub(crate) static INSERT_TICKER: &'static str = "
-    INSERT INTO stock.tickers (cik, ticker, title, industry, nation)
+    INSERT INTO stock.symbols (file_code, symbol, title, industry, nation)
     VALUES ($1, $2, $3, $4, $5)
-    ON CONFLICT (pk) DO NOTHING
+    ON CONFLICT (symbol, title, nation, industry) DO NOTHING
 ";
 
 //////////////////////////////////////////////////////////////////
@@ -35,6 +35,11 @@ pub(crate) static INSERT_METRIC: &'static str = "
     INSERT INTO stock.metrics (symbol_pk, metric_pk, acc_pk, dated, val)
     VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT (symbol_pk, metric_pk, acc_pk, dated, val) DO NOTHING
+";
+
+pub(crate) static COPY_METRIC: &'static str = "
+    COPY stock.metrics (symbol_pk, metric_pk, acc_pk, dated, year, period, form, val, accn)
+    FROM STDIN WITH (FORMAT binary)
 ";
 
 /// When a new metric is found (when scraping the SEC's compfanyfacts.zip), insert it into

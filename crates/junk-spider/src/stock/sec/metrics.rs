@@ -1,19 +1,26 @@
+use crate::http::*;
+use crate::key_tracker::KeyTracker;
 use crate::stock::common::convert_date_type;
 use crate::stock::sql;
 use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use ordered_float::OrderedFloat;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, error, info, trace, warn};
+use tokio::sync::Mutex;
+use tokio_postgres::binary_copy::BinaryCopyInWriter;
+use tokio_postgres::types::Type;
+use tracing::{debug, error, info, trace};
 
 // scrape
 // -------------------------------------------------------------------------------------------------
 pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     // wait for a pg client from the pool
-    let pg_client = pool.get().await.map_err(|err| {
+    let mut pg_client = pool.get().await.map_err(|err| {
         error!("failed to get pg client from pool, error({err})");
         err
     })?;
@@ -37,13 +44,16 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     };
     info!("fetching stock.tickers ...");
     let tickers: Vec<Ticker> = pg_client
-        .query("SELECT pk, cik, ticker, title FROM stock.tickers", &[])
+        .query(
+            "SELECT pk, file_code, symbol, title FROM stock.symbols",
+            &[],
+        )
         .await
         .map_err(|err| {
             error!("failed to fetch stock.tickers, error({err})");
             err
         })?
-        .into_iter()
+        .into_par_iter()
         .map(|row| Ticker {
             pk: row.get(0),
             cik: row.get(1),
@@ -52,6 +62,22 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         })
         .collect();
     pb.finish_with_message("fetching tickers ... done");
+
+    // fetch established metrics
+    let metrics = KeyTracker::<i32, String>::pg_fetch(
+        &mut pg_client,
+        "SELECT pk, metric FROM stock.metrics_lib",
+    )
+    .await;
+    let metrics = Arc::new(Mutex::new(metrics));
+
+    // fetch established accounting standards
+    let stds = KeyTracker::<i32, String>::pg_fetch(
+        &mut pg_client,
+        "SELECT pk, accounting FROM stock.acc_stds",
+    )
+    .await;
+    let stds = Arc::new(Mutex::new(stds));
 
     drop(pg_client);
 
@@ -68,6 +94,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         .for_each_concurrent(num_cpus::get(), |ticker| {
             let time = std::time::Instant::now();
 
+            // trackers
+            let metrics = metrics.clone();
+            let stds = stds.clone();
+
             // progress bars
             let multi = multi.clone();
             let total = total.clone();
@@ -75,18 +105,13 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
             let fail = fail.clone();
             async move {
                 // if tui is enabled, create a progress bar, per task currently being executed
-                let spinner = multi.unwrap_or_default().add(
-                    ProgressBar::new_spinner()
-                        .with_message(format!(
-                            "collecting stock metrics for [{symbol}] {title}",
-                            symbol = &ticker.ticker,
-                            title = &ticker.title
-                        ))
-                        .with_style(
-                            ProgressStyle::default_spinner()
-                                .template("\t   > {msg}")
-                                .expect("failed to set spinner style"),
-                        ),
+                let spinner = crate::tui::multi_progress_spinner(
+                    multi,
+                    format!(
+                        "collecting stock metrics for [{symbol}] {title}",
+                        symbol = &ticker.ticker,
+                        title = &ticker.title
+                    ),
                 );
                 spinner.enable_steady_tick(Duration::from_millis(50));
 
@@ -95,10 +120,12 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
 
                 // read the file
                 trace!("reading file at path: \"{path}\"");
-                spinner.set_message(format!(
-                    "deserializing metrics for [{}] {}",
-                    &ticker.ticker, &ticker.title
-                ));
+                if tui {
+                    spinner.set_message(format!(
+                        "deserializing metrics for [{}] {}",
+                        &ticker.ticker, &ticker.title
+                    ));
+                }
                 let json: Facts = match crate::fs::read_json(&path).await {
                     Ok(json) => json,
                     Err(err) => {
@@ -106,6 +133,12 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                             "failed to read file at \"{path}\" for [{}] {}: {err}",
                             &ticker.ticker, &ticker.title
                         );
+
+                        if tui {
+                            fail.expect("failed to unwrap failbar").inc(1);
+                            total.expect("failed to unwrap totalbar").inc(1);
+                        }
+
                         return;
                     }
                 };
@@ -120,101 +153,74 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     "reformatting metrics for [{}] {}",
                     &ticker.ticker, &ticker.title
                 ));
-                let mut metrics: Vec<Metric> = vec![];
-                for (dataset_id, metric) in json.facts {
-                    // match the dataset_id to any valid datasets included in the static ACC_STDS
-                    // map
-                    match sql::ACC_STDS.get(&dataset_id) {
-                        Some(acc_pk) => {
-                            // if valid, parse the dataset
-                            for (metric_name, dataset) in metric {
-                                spinner.set_message(format!(
-                                    "waiting to fetch Primary Keys for [{}] {}",
-                                    &ticker.ticker, &ticker.title
-                                ));
-                                let pg_client = match pool.get().await {
-                                    Ok(client) => client,
-                                    Err(err) => {
-                                        error!("failed to get pg client from pool, error({err})");
-                                        if tui {
-                                            fail.expect("failbar should have unwrapped").inc(1);
-                                            total.expect("totalbar should have unwrapped").inc(1);
+
+                // build a table of unique rows (and keep everything async)
+                let tbl: Arc<Mutex<HashSet<Metric>>> = Arc::new(Mutex::new(HashSet::new()));
+                stream::iter(json.facts)
+                    .for_each(|(acc_std, datasets)| {
+                        let metrics = metrics.clone();
+                        let tbl = tbl.clone();
+                        let stds = stds.clone();
+
+                        async move {
+                            // track the Accounting Standards PK
+                            let std_pk = {
+                                let mut stds = stds.lock().await;
+                                stds.transact(acc_std)
+                            };
+
+                            stream::iter(datasets)
+                                .for_each(|(metric, data)| {
+                                    let metrics = metrics.clone();
+                                    let tbl = tbl.clone();
+
+                                    async move {
+                                        // track the Metric Name PK
+                                        let metric_pk = {
+                                            let mut metrics = metrics.lock().await;
+                                            metrics.transact(metric)
+                                        };
+
+                                        let cells = data
+                                            .units
+                                            .into_iter()
+                                            .flat_map(|(_units, cells)| cells)
+                                            .collect::<Vec<_>>();
+
+                                        let mut batch = vec![];
+                                        for cell in cells {
+                                            batch.push(Metric {
+                                                symbol_pk: ticker.pk,
+                                                metric_pk,
+                                                acc_pk: std_pk,
+                                                dated: convert_date_type(&cell.dated)
+                                                    .expect("failed to convert date type"),
+                                                year: cell.fy,
+                                                period: cell.fp,
+                                                form: cell.form,
+                                                val: OrderedFloat(cell.val),
+                                                accn: cell.accn,
+                                            });
                                         }
-                                        return;
-                                    }
-                                };
 
-                                // insert the metric name
-                                match pg_client
-                                    .query(sql::INSERT_METRIC_PK, &[&metric_name])
-                                    .await
-                                {
-                                    Ok(_) => trace!(
-                                        "inserted metric {metric_name} from [{}], {}",
-                                        &ticker.ticker,
-                                        &ticker.title
-                                    ),
-                                    Err(err) => {
-                                        error!(
-                                            "failed to insert metric into metrics_lib, error({err})"
-                                        );
-                                        if tui {
-                                            fail.expect("failbar should have unwrapped").inc(1);
-                                            total.expect("totalbar should have unwrapped").inc(1);
+                                        let mut tbl = tbl.lock().await;
+                                        for metric in batch {
+                                            tbl.insert(metric);
                                         }
-                                        return;
                                     }
-                                };
-
-                                // return the pk for the metric name
-                                let metric_pk = match pg_client
-                                    .query(sql::GET_METRIC_PK, &[&metric_name])
-                                    .await
-                                {
-                                    Ok(rows) => rows[0].get(0),
-                                    Err(err) => {
-                                        error!(
-                                            "failed to get metric_pk from metrics_lib, error({err})"
-                                        );
-                                        if tui {
-                                            fail.expect("failbar should have unwrapped").inc(1);
-                                            total.expect("totalbar should have unwrapped").inc(1);
-                                        }
-                                        return;
-                                    }
-                                };
-
-                                drop(pg_client);
-
-                                spinner.set_message(format!(
-                                    "reformatting data for [{}] {}",
-                                    &ticker.ticker, &ticker.title
-                                ));
-                                for (_units, values) in dataset.units {
-                                    for cell in values {
-                                        metrics.push(Metric {
-                                            symbol_pk: ticker.pk,
-                                            metric_pk,
-                                            acc_pk: *acc_pk,
-                                            dated: convert_date_type(&cell.dated)
-                                                .expect("failed to convert date type"),
-                                            val: cell.val,
-                                        });
-                                    }
-                                }
-                            }
+                                })
+                                .await;
                         }
-                        None => {
-                            warn!("unexpected dataset found in Company Fact data {dataset_id}")
-                        }
-                    };
+                    })
+                    .await;
+
+                // get a client back from the pool
+                if tui {
+                    spinner.set_message(format!(
+                        "waiting to insert metrics for [{}] {}",
+                        &ticker.ticker, &ticker.title
+                    ));
                 }
-
-                // insert into stock.metrics
-                spinner.set_message(format!(
-                    "waiting to insert metrics for [{}] {}",
-                    &ticker.ticker, &ticker.title
-                ));
                 let mut pg_client = match pool.get().await {
                     Ok(client) => client,
                     Err(err) => {
@@ -227,16 +233,79 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     }
                 };
 
-                let query = pg_client
-                    .prepare(sql::INSERT_METRIC)
+                // get the pre-existing data, and remove it from the set
+                if tui {
+                    spinner.set_message(format!(
+                        "removing pre-existing Primary Keys for [{}] {}",
+                        &ticker.ticker, &ticker.title
+                    ));
+                }
+                let exists: HashSet<MetricPrimaryKey> = pg_client
+                    .query(
+                        "
+                        SELECT symbol_pk, metric_pk, acc_pk, dated, val, accn FROM stock.metrics
+                        WHERE symbol_pk = $1
+                    ",
+                        &[&ticker.pk],
+                    )
                     .await
-                    .expect("failed to prepare INSERT_METRIC statement");
+                    .expect("failed to fetch existing metrics")
+                    .iter()
+                    .map(|row| MetricPrimaryKey {
+                        symbol_pk: row.get(0),
+                        metric_pk: row.get(1),
+                        acc_pk: row.get(2),
+                        dated: row.get(3),
+                        val: OrderedFloat(row.get(4)),
+                        accn: row.get(5),
+                    })
+                    .collect();
 
-                let transaction = match pg_client.transaction().await {
-                    Ok(tr) => Arc::new(tr),
+                let tbl: HashSet<Metric> = Arc::into_inner(tbl)
+                    .expect("failed to unwrap tbl")
+                    .into_inner()
+                    .into_iter()
+                    .filter(|row| {
+                        !exists.contains(&MetricPrimaryKey {
+                            symbol_pk: row.symbol_pk,
+                            metric_pk: row.metric_pk,
+                            acc_pk: row.acc_pk,
+                            dated: row.dated,
+                            val: row.val,
+                            accn: row.accn.clone(),
+                        })
+                    })
+                    .collect();
+
+                drop(exists);
+
+                // copy the remaining data in
+                info!(
+                    "copying transformed metric data for [{}] {}",
+                    &ticker.ticker, &ticker.title
+                );
+                if tui {
+                    spinner.set_message(format!(
+                        "copying metrics for [{}] {}",
+                        &ticker.ticker, &ticker.title
+                    ));
+                }
+                match pg_copy(&mut pg_client, tbl).await {
+                    Ok(_) => {
+                        debug!(
+                            "metric data inserted for [{}] {}, {}",
+                            &ticker.ticker,
+                            &ticker.title,
+                            crate::time_elapsed(time)
+                        );
+                        if tui {
+                            success.expect("successbar should have unwrapped").inc(1);
+                            total.expect("totalbar should have unwrapped").inc(1);
+                        }
+                    }
                     Err(err) => {
                         error!(
-                            "failed to create transaction for [{}] {}, error({err})",
+                            "failed to copy metrics data for [{}] {}, error({err})",
                             &ticker.ticker, &ticker.title
                         );
                         if tui {
@@ -245,74 +314,6 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                         }
                         return;
                     }
-                };
-
-                // stream the data to transaction
-                info!(
-                    "inserting reformatted metric data for [{}] {}",
-                    &ticker.ticker, &ticker.title
-                );
-                spinner.set_message(format!(
-                    "inserting metrics for [{}] {}",
-                    &ticker.ticker, &ticker.title
-                ));
-                let mut stream = stream::iter(metrics);
-                while let Some(metric) = stream.next().await {
-                    let query = query.clone();
-                    let transaction = transaction.clone();
-                    let tkr = &ticker.ticker;
-                    let title = &ticker.title;
-
-                    // progress bar
-                    let total = total.clone();
-                    let fail = fail.clone();
-                    async move {
-                        match transaction
-                            .execute(
-                                &query,
-                                &[
-                                    &metric.symbol_pk,
-                                    &metric.metric_pk,
-                                    &metric.acc_pk,
-                                    &metric.dated,
-                                    &metric.val,
-                                ],
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                trace!("inserted metric data for [{tkr}] {title}");
-                            }
-                            Err(err) => {
-                                error!(
-                                    "failed to insert metric data for [{tkr}] {title}, error({err})"
-                                );
-                                if tui {
-                                    fail.expect("failbar should have unwrapped").inc(1);
-                                    total.expect("totalbar should have unwrapped").inc(1);
-                                }
-                                return;
-                            }
-                        }
-                    }
-                    .await;
-                }
-
-                Arc::into_inner(transaction)
-                    .expect("failed to unpack transaction")
-                    .commit()
-                    .await
-                    .expect("failed to commit transaction");
-
-                debug!(
-                    "metric data inserted for [{}] {}, {}",
-                    &ticker.ticker,
-                    &ticker.title,
-                    crate::time_elapsed(time)
-                );
-                if tui {
-                    success.expect("successbar should have unwrapped").inc(1);
-                    total.expect("totalbar should have unwrapped").inc(1);
                 }
             }
         })
@@ -328,7 +329,36 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         .finish_and_clear();
 
     if tui {
-        println!("collecting stock metrics ... done\n");
+        println!("collecting stock metrics ... done");
+    }
+
+    let mut pg_client = pool.get().await?;
+
+    Arc::into_inner(stds)
+        .expect("failed to unwrap stds")
+        .into_inner()
+        .pg_insert(
+            &mut pg_client,
+            "INSERT INTO stock.acc_stds (pk, accounting) VALUES ($1, $2)
+            ON CONFLICT DO NOTHING",
+        )
+        .await;
+    if tui {
+        println!("inserted accounting standards");
+    }
+
+    Arc::into_inner(metrics)
+        .expect("failed to unwrap metrics")
+        .into_inner()
+        .pg_insert(
+            &mut pg_client,
+            "INSERT INTO stock.metrics_lib (pk, metric) VALUES ($1, $2)
+            ON CONFLICT DO NOTHING",
+        )
+        .await;
+
+    if tui {
+        println!("inserted metric names\n");
     }
 
     Ok(())
@@ -350,19 +380,86 @@ struct Ticker {
 
 // [
 //      {
-//          "dated": "2021-01-01",      # types | rust: NaiveDate -> postgres: DATE
+//          "dated": "2021-01-01",
 //          "metric": "Revenues",
 //          "val": "213123123123"
 //      },
 //      ...
 // ]
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 struct Metric {
     symbol_pk: i32,
     metric_pk: i32,
     acc_pk: i32,
     dated: chrono::NaiveDate,
-    val: f64,
+    year: Option<i16>,
+    period: Option<String>,
+    form: Option<String>,
+    val: OrderedFloat<f64>,
+    accn: String,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+struct MetricPrimaryKey {
+    symbol_pk: i32,
+    metric_pk: i32,
+    acc_pk: i32,
+    dated: chrono::NaiveDate,
+    val: OrderedFloat<f64>,
+    accn: String,
+}
+
+/// Execute the COPY statement, inserting the data into the database.
+///
+/// ### **NOTE**
+///
+/// Any TRANSACTION will fail completely if a single COPY statement fails;
+/// data must be filtered before being inserted.
+async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::Result<()> {
+    let tx = pg_client.transaction().await?;
+
+    let sink = tx.copy_in(sql::COPY_METRIC).await?;
+    let writer = BinaryCopyInWriter::new(
+        sink,
+        &[
+            Type::INT4,
+            Type::INT4,
+            Type::INT4,
+            Type::DATE,
+            Type::INT2,
+            Type::BPCHAR,
+            Type::VARCHAR,
+            Type::FLOAT8,
+            Type::VARCHAR,
+        ],
+    );
+    futures::pin_mut!(writer);
+
+    for x in metrics {
+        match writer
+            .as_mut()
+            .write(&[
+                &x.symbol_pk,
+                &x.metric_pk,
+                &x.acc_pk,
+                &x.dated as &(dyn tokio_postgres::types::ToSql + Sync),
+                &x.year,
+                &x.period,
+                &x.form,
+                &x.val.into_inner(),
+                &x.accn,
+            ])
+            .await
+        {
+            Ok(_) => (),
+            Err(err) => trace!("failed to write metric data to COPY statement, error({err})"),
+        }
+    }
+
+    writer.finish().await?;
+    tx.commit().await?;
+
+    Ok(())
 }
 
 // =====
@@ -375,7 +472,7 @@ struct Metric {
 struct Facts {
     //                      vvvv == "MetricName"
     facts: HashMap<String, HashMap<String, MetricData>>,
-    //          ^^^^  == "dei" or "us-gaap"
+    //             ^^^^  == "dei" or "us-gaap"
 }
 
 //          "dei": {
@@ -383,7 +480,7 @@ struct Facts {
 #[derive(Deserialize, Debug)]
 struct MetricData {
     units: HashMap<String, Vec<DataCell>>,
-    //          ^^^^ == "shares" or "USD"
+    //             ^^^^ == "shares" or "USD"
 }
 //                  "label":"Entity Common Stock, Shares Outstanding",
 //                  "description":"Indicate number of shares or ...",
@@ -397,6 +494,10 @@ struct DataCell {
     //                ^^^ "end" is a keyword in PostgreSQL, so it's renamed to "dated"
     dated: String,
     val: f64,
+    fy: Option<i16>,
+    fp: Option<String>,
+    form: Option<String>,
+    accn: String,
 }
 //                          {
 //                              "end":"2009-06-30",
