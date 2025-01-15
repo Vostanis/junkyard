@@ -193,13 +193,21 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                                                 symbol_pk: ticker.pk,
                                                 metric_pk,
                                                 acc_pk: std_pk,
-                                                dated: convert_date_type(&cell.dated)
+                                                start_date: {
+                                                    if let Some(start_date) = cell.start_date {
+                                                        Some(convert_date_type(&start_date)
+                                                            .expect("failed to convert date type"))
+                                                    } else { None }},
+                                                end_date: convert_date_type(&cell.end_date)
+                                                    .expect("failed to convert date type"),
+                                                filing_date: convert_date_type(&cell.filing_date)
                                                     .expect("failed to convert date type"),
                                                 year: cell.fy,
                                                 period: cell.fp,
                                                 form: cell.form,
                                                 val: OrderedFloat(cell.val),
                                                 accn: cell.accn,
+                                                frame: cell.frame,
                                             });
                                         }
 
@@ -243,7 +251,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                 let exists: HashSet<MetricPrimaryKey> = pg_client
                     .query(
                         "
-                        SELECT symbol_pk, metric_pk, acc_pk, dated, val, accn FROM stock.metrics
+                        SELECT symbol_pk, metric_pk, acc_pk, end_date, filing_date, val, accn FROM stock.metrics
                         WHERE symbol_pk = $1
                     ",
                         &[&ticker.pk],
@@ -255,9 +263,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                         symbol_pk: row.get(0),
                         metric_pk: row.get(1),
                         acc_pk: row.get(2),
-                        dated: row.get(3),
-                        val: OrderedFloat(row.get(4)),
-                        accn: row.get(5),
+                        end_date: row.get(3),
+                        filing_date: row.get(4),
+                        val: OrderedFloat(row.get(5)),
+                        accn: row.get(6),
                     })
                     .collect();
 
@@ -270,7 +279,8 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                             symbol_pk: row.symbol_pk,
                             metric_pk: row.metric_pk,
                             acc_pk: row.acc_pk,
-                            dated: row.dated,
+                            end_date: row.end_date,
+                            filing_date: row.filing_date,
                             val: row.val,
                             accn: row.accn.clone(),
                         })
@@ -391,12 +401,15 @@ struct Metric {
     symbol_pk: i32,
     metric_pk: i32,
     acc_pk: i32,
-    dated: chrono::NaiveDate,
+    start_date: Option<chrono::NaiveDate>,
+    end_date: chrono::NaiveDate,
+    filing_date: chrono::NaiveDate,
     year: Option<i16>,
     period: Option<String>,
     form: Option<String>,
     val: OrderedFloat<f64>,
     accn: String,
+    frame: Option<String>,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
@@ -404,7 +417,8 @@ struct MetricPrimaryKey {
     symbol_pk: i32,
     metric_pk: i32,
     acc_pk: i32,
-    dated: chrono::NaiveDate,
+    end_date: chrono::NaiveDate,
+    filing_date: chrono::NaiveDate,
     val: OrderedFloat<f64>,
     accn: String,
 }
@@ -426,6 +440,8 @@ async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::
             Type::INT4,
             Type::INT4,
             Type::DATE,
+            Type::DATE,
+            Type::DATE,
             Type::INT2,
             Type::BPCHAR,
             Type::VARCHAR,
@@ -442,7 +458,9 @@ async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::
                 &x.symbol_pk,
                 &x.metric_pk,
                 &x.acc_pk,
-                &x.dated as &(dyn tokio_postgres::types::ToSql + Sync),
+                &x.start_date as &(dyn tokio_postgres::types::ToSql + Sync),
+                &x.end_date as &(dyn tokio_postgres::types::ToSql + Sync),
+                &x.filing_date as &(dyn tokio_postgres::types::ToSql + Sync),
                 &x.year,
                 &x.period,
                 &x.form,
@@ -490,14 +508,18 @@ struct MetricData {
 
 #[derive(Deserialize, Debug)]
 struct DataCell {
+    #[serde(rename = "start")]
+    start_date: Option<String>,
     #[serde(rename = "end")]
-    //                ^^^ "end" is a keyword in PostgreSQL, so it's renamed to "dated"
-    dated: String,
+    end_date: String,
+    #[serde(rename = "filed")]
+    filing_date: String,
     val: f64,
     fy: Option<i16>,
     fp: Option<String>,
     form: Option<String>,
     accn: String,
+    frame: Option<String>,
 }
 //                          {
 //                              "end":"2009-06-30",

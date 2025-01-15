@@ -1216,10 +1216,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "junk-cache"
-version = "0.1.0"
-
-[[package]]
 name = "junk-spider"
 version = "0.1.0"
 dependencies = [
@@ -1249,14 +1245,6 @@ dependencies = [
  "tracing",
  "zip",
 ]
-
-[[package]]
-name = "junk-tui"
-version = "0.1.0"
-
-[[package]]
-name = "junk-web"
-version = "0.1.0"
 
 [[package]]
 name = "lazy_static"

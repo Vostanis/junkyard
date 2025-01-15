@@ -100,16 +100,20 @@ CREATE TABLE IF NOT EXISTS stock.metrics (
 	symbol_pk INT NOT NULL,
 	metric_pk INT NOT NULL,
 	acc_pk INT NOT NULL,
-	dated DATE NOT NULL,
+	start_date DATE,
+	end_date DATE NOT NULL,
+	filing_date DATE NOT NULL,
 	year SMALLINT,
 	period CHAR(2),
 	form VARCHAR,
 	val FLOAT NOT NULL,
 	accn VARCHAR,
-	PRIMARY KEY (symbol_pk, metric_pk, acc_pk, dated, val, accn)
+	frame VARCHAR,
+	PRIMARY KEY (symbol_pk, metric_pk, acc_pk, end_date, filing_date, val, accn)
 );
 CREATE INDEX IF NOT EXISTS idx_symbol_pk ON stock.metrics(symbol_pk);
-CREATE INDEX IF NOT EXISTS idx_dated ON stock.metrics(dated);
+CREATE INDEX IF NOT EXISTS idx_end_date ON stock.metrics(end_date);
+CREATE INDEX IF NOT EXISTS idx_filing_date ON stock.metrics(filing_date);
 
 -- metrics library (e.g., pk: 1 -> name: "Revenues")
 CREATE TABLE IF NOT EXISTS stock.metrics_lib (
