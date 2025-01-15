@@ -153,6 +153,8 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     "reformatting metrics for [{}] {}",
                     &ticker.ticker, &ticker.title
                 ));
+
+                // build a table of unique rows (and keep everything async)
                 let tbl: Arc<Mutex<HashSet<Metric>>> = Arc::new(Mutex::new(HashSet::new()));
                 stream::iter(json.facts)
                     .for_each(|(acc_std, datasets)| {
@@ -179,29 +181,32 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                                             metrics.transact(metric)
                                         };
 
-                                        stream::iter(data.units)
-                                            .for_each(|(_units, cells)| {
-                                                let tbl = tbl.clone();
-                                                async move {
-                                                    for cell in cells {
-                                                        tbl.lock().await.insert(Metric {
-                                                            symbol_pk: ticker.pk,
-                                                            metric_pk,
-                                                            acc_pk: std_pk,
-                                                            dated: convert_date_type(&cell.dated)
-                                                                .expect(
-                                                                    "failed to convert date type",
-                                                                ),
-                                                            year: cell.fy,
-                                                            period: cell.fp,
-                                                            form: cell.form,
-                                                            val: OrderedFloat(cell.val),
-                                                            accn: cell.accn,
-                                                        });
-                                                    }
-                                                }
-                                            })
-                                            .await;
+                                        let cells = data
+                                            .units
+                                            .into_iter()
+                                            .flat_map(|(_units, cells)| cells)
+                                            .collect::<Vec<_>>();
+
+                                        let mut batch = vec![];
+                                        for cell in cells {
+                                            batch.push(Metric {
+                                                symbol_pk: ticker.pk,
+                                                metric_pk,
+                                                acc_pk: std_pk,
+                                                dated: convert_date_type(&cell.dated)
+                                                    .expect("failed to convert date type"),
+                                                year: cell.fy,
+                                                period: cell.fp,
+                                                form: cell.form,
+                                                val: OrderedFloat(cell.val),
+                                                accn: cell.accn,
+                                            });
+                                        }
+
+                                        let mut tbl = tbl.lock().await;
+                                        for metric in batch {
+                                            tbl.insert(metric);
+                                        }
                                     }
                                 })
                                 .await;
@@ -229,6 +234,12 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                 };
 
                 // get the pre-existing data, and remove it from the set
+                if tui {
+                    spinner.set_message(format!(
+                        "removing pre-existing Primary Keys for [{}] {}",
+                        &ticker.ticker, &ticker.title
+                    ));
+                }
                 let exists: HashSet<MetricPrimaryKey> = pg_client
                     .query(
                         "
@@ -387,8 +398,6 @@ struct Metric {
     val: OrderedFloat<f64>,
     accn: String,
 }
-
-struct MetricVisitor;
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct MetricPrimaryKey {
