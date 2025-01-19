@@ -9,6 +9,7 @@ use ordered_float::OrderedFloat;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::hash::DefaultHasher;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -16,15 +17,66 @@ use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
 use tracing::{debug, error, info, trace};
 
+/// The process for copying SEC metric.json files from the /buffer/ directory into the database.
+struct Process {
+    tickers: Vec<Ticker>,
+    metrics: Arc<Mutex<KeyTracker<i32, String>>>,
+    acc_stds: Arc<Mutex<KeyTracker<i32, String>>>,
+}
+
+impl Process {
+    async fn start(pool: &Pool) -> Self {
+        // wait for a pg client from the pool
+        let mut pg_client = pool.get().await.expect("failed to get pg client from pool");
+
+        // return all tickers from the database
+        trace!("fetching tickers ...");
+        let tickers: Vec<Ticker> = pg_client
+            .query(
+                "SELECT pk, file_code, symbol, title FROM stock.symbols LIMIT 1",
+                &[],
+            )
+            .await
+            .expect("failed to fetch stock.tickers")
+            .into_par_iter()
+            .map(|row| Ticker {
+                pk: row.get(0),
+                cik: row.get(1),
+                ticker: row.get(2),
+                title: row.get(3),
+            })
+            .collect();
+
+        // fetch established metrics
+        trace!("fetching metrics lib ...");
+        let metrics = KeyTracker::<i32, String>::pg_fetch(
+            &mut pg_client,
+            "SELECT pk, metric FROM stock.metrics_lib",
+        )
+        .await;
+        let metrics = Arc::new(Mutex::new(metrics));
+
+        // fetch established accounting standards
+        trace!("fetching accounting standards ...");
+        let acc_stds = KeyTracker::<i32, String>::pg_fetch(
+            &mut pg_client,
+            "SELECT pk, accounting FROM stock.acc_stds",
+        )
+        .await;
+        drop(pg_client);
+        let acc_stds = Arc::new(Mutex::new(acc_stds));
+
+        Self {
+            tickers,
+            metrics,
+            acc_stds,
+        }
+    }
+}
+
 // scrape
 // -------------------------------------------------------------------------------------------------
 pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
-    // wait for a pg client from the pool
-    let mut pg_client = pool.get().await.map_err(|err| {
-        error!("failed to get pg client from pool, error({err})");
-        err
-    })?;
-
     // return all tickers from the database
     if tui {
         println!(
@@ -33,70 +85,42 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
             name = "SEC Metrics"
         )
     }
+
+    debug!("starting metric scraping process ...");
     let pb = if tui {
         let pb = ProgressBar::new_spinner()
-            .with_message("fetching tickers ...")
-            .with_style(ProgressStyle::default_spinner().template("{msg} {spinner:.magenta}")?);
+            .with_message("initialising tables ...")
+            .with_style(
+                ProgressStyle::default_spinner()
+                    .template("{msg} {spinner:.magenta}")
+                    .expect("failed to set progress bar style"),
+            );
         pb.enable_steady_tick(Duration::from_millis(100));
         pb
     } else {
         ProgressBar::hidden()
     };
-    info!("fetching stock.tickers ...");
-    let tickers: Vec<Ticker> = pg_client
-        .query(
-            "SELECT pk, file_code, symbol, title FROM stock.symbols",
-            &[],
-        )
-        .await
-        .map_err(|err| {
-            error!("failed to fetch stock.tickers, error({err})");
-            err
-        })?
-        .into_par_iter()
-        .map(|row| Ticker {
-            pk: row.get(0),
-            cik: row.get(1),
-            ticker: row.get(2),
-            title: row.get(3),
-        })
-        .collect();
-    pb.finish_with_message("fetching tickers ... done");
-
-    // fetch established metrics
-    let metrics = KeyTracker::<i32, String>::pg_fetch(
-        &mut pg_client,
-        "SELECT pk, metric FROM stock.metrics_lib",
-    )
-    .await;
-    let metrics = Arc::new(Mutex::new(metrics));
-
-    // fetch established accounting standards
-    let stds = KeyTracker::<i32, String>::pg_fetch(
-        &mut pg_client,
-        "SELECT pk, accounting FROM stock.acc_stds",
-    )
-    .await;
-    let stds = Arc::new(Mutex::new(stds));
-
-    drop(pg_client);
+    let pr = Process::start(pool).await;
+    pb.finish_and_clear();
+    if tui {
+        println!("initialising tables ... done");
+    }
 
     // progress bar
     let (multi, total, success, fail) = if tui {
-        crate::tui::multi_progress(tickers.len())?
+        crate::tui::multi_progress(pr.tickers.len())?
     } else {
         (None, None, None, None)
     };
 
-    info!("fetching SEC metrics ...");
-    let stream = stream::iter(tickers);
+    let stream = stream::iter(pr.tickers);
     stream
         .for_each_concurrent(num_cpus::get(), |ticker| {
             let time = std::time::Instant::now();
 
             // trackers
-            let metrics = metrics.clone();
-            let stds = stds.clone();
+            let metrics = pr.metrics.clone();
+            let stds = pr.acc_stds.clone();
 
             // progress bars
             let multi = multi.clone();
@@ -251,7 +275,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                 let exists: HashSet<MetricPrimaryKey> = pg_client
                     .query(
                         "
-                        SELECT symbol_pk, metric_pk, acc_pk, end_date, filing_date, val, accn FROM stock.metrics
+                        SELECT symbol_pk, metric_pk, acc_pk, end_date, filing_date, year, period, form, val, accn FROM stock.metrics
                         WHERE symbol_pk = $1
                     ",
                         &[&ticker.pk],
@@ -265,8 +289,11 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                         acc_pk: row.get(2),
                         end_date: row.get(3),
                         filing_date: row.get(4),
-                        val: OrderedFloat(row.get(5)),
-                        accn: row.get(6),
+                        year: row.get(5),
+                        period: row.get(6),
+                        form: row.get(7),
+                        val: OrderedFloat(row.get(8)),
+                        accn: row.get(9),
                     })
                     .collect();
 
@@ -275,16 +302,13 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     .into_inner()
                     .into_iter()
                     .filter(|row| {
-                        !exists.contains(&MetricPrimaryKey {
-                            symbol_pk: row.symbol_pk,
-                            metric_pk: row.metric_pk,
-                            acc_pk: row.acc_pk,
-                            end_date: row.end_date,
-                            filing_date: row.filing_date,
-                            val: row.val,
-                            accn: row.accn.clone(),
-                        })
+                        !exists.contains(&row.pk())
                     })
+                    // .map(|row| {
+                    //     if row = MetricPrimaryKey{10545, 2189, 2, 2009-06-27, 2010-07-21, Q3, 10-Q, 0, 0001193125-10-162840} {
+                    //     println!("{:?}", row);
+                    //     }
+                    // })
                     .collect();
 
                 drop(exists);
@@ -344,7 +368,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
 
     let mut pg_client = pool.get().await?;
 
-    Arc::into_inner(stds)
+    Arc::into_inner(pr.acc_stds)
         .expect("failed to unwrap stds")
         .into_inner()
         .pg_insert(
@@ -357,7 +381,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
         println!("inserted accounting standards");
     }
 
-    Arc::into_inner(metrics)
+    Arc::into_inner(pr.metrics)
         .expect("failed to unwrap metrics")
         .into_inner()
         .pg_insert(
@@ -384,15 +408,23 @@ struct Ticker {
 // de
 // -------------------------------------------------------------------------------------------------
 
-// ======
 // Output
 // ======
-
 // [
 //      {
-//          "dated": "2021-01-01",
+//          "symbol_pk": 1,
+//          "metric_pk": 2,
+//          "acc_pk": 3,
+//          "start_date": "2021-01-01",
+//          "end_date": "2021-03-30",
+//          "filing_date": "2021-01-09",
+//          "year": 2021,
+//          "period": "Q2",
+//          "form": "10-K",
 //          "metric": "Revenues",
-//          "val": "213123123123"
+//          "val": "213123123123",
+//          "accn": "324987349-12321-2109381283",
+//          "frame": "CY2021Q2",
 //      },
 //      ...
 // ]
@@ -404,12 +436,29 @@ struct Metric {
     start_date: Option<chrono::NaiveDate>,
     end_date: chrono::NaiveDate,
     filing_date: chrono::NaiveDate,
-    year: Option<i16>,
-    period: Option<String>,
-    form: Option<String>,
+    year: i16,
+    period: String,
+    form: String,
     val: OrderedFloat<f64>,
     accn: String,
     frame: Option<String>,
+}
+
+impl Metric {
+    fn pk(&self) -> MetricPrimaryKey {
+        MetricPrimaryKey {
+            symbol_pk: self.symbol_pk,
+            metric_pk: self.metric_pk,
+            acc_pk: self.acc_pk,
+            end_date: self.end_date,
+            filing_date: self.filing_date,
+            year: self.year,
+            period: self.period.clone(),
+            form: self.form.clone(),
+            val: self.val,
+            accn: self.accn.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
@@ -419,6 +468,9 @@ struct MetricPrimaryKey {
     acc_pk: i32,
     end_date: chrono::NaiveDate,
     filing_date: chrono::NaiveDate,
+    year: i16,
+    period: String,
+    form: String,
     val: OrderedFloat<f64>,
     accn: String,
 }
@@ -447,6 +499,7 @@ async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::
             Type::VARCHAR,
             Type::FLOAT8,
             Type::VARCHAR,
+            Type::VARCHAR,
         ],
     );
     futures::pin_mut!(writer);
@@ -466,6 +519,7 @@ async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::
                 &x.form,
                 &x.val.into_inner(),
                 &x.accn,
+                &x.frame,
             ])
             .await
         {
@@ -480,10 +534,9 @@ async fn pg_copy(pg_client: &mut PgClient, metrics: HashSet<Metric>) -> anyhow::
     Ok(())
 }
 
-// =====
 // Input
 // =====
-
+//
 // {
 //    "facts": {
 #[derive(Deserialize, Debug)]
@@ -515,9 +568,9 @@ struct DataCell {
     #[serde(rename = "filed")]
     filing_date: String,
     val: f64,
-    fy: Option<i16>,
-    fp: Option<String>,
-    form: Option<String>,
+    fy: i16,
+    fp: String,
+    form: String,
     accn: String,
     frame: Option<String>,
 }

@@ -104,13 +104,14 @@ CREATE TABLE IF NOT EXISTS stock.metrics (
 	end_date DATE NOT NULL,
 	filing_date DATE NOT NULL,
 	year SMALLINT,
-	period CHAR(2),
-	form VARCHAR,
+	period CHAR(2) NOT NULL,
+	form VARCHAR NOT NULL,
 	val FLOAT NOT NULL,
 	accn VARCHAR,
-	frame VARCHAR,
-	PRIMARY KEY (symbol_pk, metric_pk, acc_pk, end_date, filing_date, val, accn)
+	frame VARCHAR
 );
+ALTER TABLE stock.metrics
+ADD CONSTRAINT stock_metric_entries UNIQUE (symbol_pk, metric_pk, acc_pk, start_date, end_date, filing_date, year, period, form, val, accn, frame);
 CREATE INDEX IF NOT EXISTS idx_symbol_pk ON stock.metrics(symbol_pk);
 CREATE INDEX IF NOT EXISTS idx_end_date ON stock.metrics(end_date);
 CREATE INDEX IF NOT EXISTS idx_filing_date ON stock.metrics(filing_date);

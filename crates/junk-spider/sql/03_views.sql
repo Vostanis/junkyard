@@ -3,12 +3,15 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS stock.metrics_matv AS
 SELECT
 	sy.symbol,
 	sy.title,
-	m.dated,
+	m.start_date,
+	m.end_date,
 	m.year,
 	m.period,
 	m.form,
+	m.frame,
 	mlib.metric,
-	m.val
+	m.val,
+	acc.accounting
 FROM stock.symbols AS sy
 INNER JOIN stock.metrics AS m
 	ON sy.pk = m.symbol_pk
