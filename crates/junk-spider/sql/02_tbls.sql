@@ -85,7 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_title ON stock.symbols(title);
 CREATE TABLE IF NOT EXISTS stock.prices (
 	symbol_pk INT,
 	interval_pk SMALLINT,
-	datetime TIMESTAMP WITH TIME ZONE NOT NULL,
+	dt TIMESTAMP WITH TIME ZONE NOT NULL,
 	opening FLOAT,
 	high FLOAT,
 	low FLOAT,

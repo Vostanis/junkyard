@@ -1,4 +1,24 @@
--- stock metrics 
+--------------------------------------------------------------------------
+--
+-- RELATION TO THE DATABASE
+-- ========================
+--
+-- MATERIALIZED VIEWs are used as the entrypoint for publicised data;
+-- 1. they are precomputed, and so are fast to query;
+-- 2. a layer of transformation between the raw input and the output is
+--    cleaner for debugging;
+-- 3. and they can be refreshed on a schedule, or on-demand.
+--
+-- Therefore, when users query data (via an app or API), they're querying
+-- from one of the following views.
+--
+--------------------------------------------------------------------------
+
+-- =====================================================================
+-- STOCKS
+-- =====================================================================
+
+-- Stock Metrics
 CREATE MATERIALIZED VIEW IF NOT EXISTS stock.metrics_matv AS
 SELECT
 	sy.symbol,
@@ -21,51 +41,57 @@ INNER JOIN stock.acc_stds AS acc
 	ON acc.pk = m.acc_pk
 ;
 
--- stock prices
+-- Stock Prices
 CREATE MATERIALIZED VIEW IF NOT EXISTS stock.prices_matv AS
 
--- preprocess 2nd gen metrics
 WITH 
--- moving averages for volume & price
+-- moving averages for volume & price (adj. close), per 7, 90, and 365 x interval
 moving_average_cte AS (
-SELECT
-        pr.symbol_pk,
-        pr.interval_pk,
-        pr.dt,
-        pr.volume,
-	AVG(pr.volume) OVER (
-		PARTITION BY pr.symbol_pk, pr.interval_pk
-		ORDER BY pr.dt
-		ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-	) as volume_7ma,
-	AVG(pr.volume) OVER (
-		PARTITION BY pr.symbol_pk, pr.interval_pk
-		ORDER BY pr.dt
-		ROWS BETWEEN 90 PRECEDING AND CURRENT ROW
-	) as volume_90ma,
-	AVG(pr.volume) OVER (
-		PARTITION BY pr.symbol_pk, pr.interval_pk
-		ORDER BY pr.dt
-		ROWS BETWEEN 365 PRECEDING AND CURRENT ROW
-	) as volume_365ma
-FROM stock.prices AS pr
-)
+	SELECT
+		pr.symbol_pk,
+		pr.interval_pk,
+		pr.dt,
+		pr.volume,
+		AVG(pr.volume) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+		) AS volume_7ma,
+		AVG(pr.volume) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 89 PRECEDING AND CURRENT ROW
+		) AS volume_90ma,
+		AVG(pr.volume) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+		) AS volume_365ma
+	FROM stock.prices AS pr
+),
 
--- price change percentages; per interval
-price_change_cte AS (
-SELECT
-	pr.symbol_pk,
-	pr.interval_pk,
-	pr.dt,
-	pr.adj_close,
-        (pr.adj_close - LAG(pr.adj_close) OVER (
-            PARTITION BY pr.symbol_pk, pr.interval_pk
-            ORDER BY pr.datetime
-        )) / LAG(pr.adj_close) OVER (
-            PARTITION BY pr.symbol_pk, pr.interval_pk
-            ORDER BY pr.datetime
-        ) * 100 AS adj_close_pct_change
-FROM stock.prices as pr
+-- price (adj. close) change percentages, per interval
+percentage_change_cte AS (
+	SELECT
+		pr.symbol_pk,
+		pr.interval_pk,
+		pr.dt,
+		pr.adj_close,
+		CASE
+			-- error case: division by zero
+			WHEN LAG(pr.adj_close) OVER (
+			    PARTITION BY pr.symbol_pk, pr.interval_pk
+			    ORDER BY pr.dt
+			) = 0 THEN NULL
+			ELSE (pr.adj_close - LAG(pr.adj_close) OVER (
+			    PARTITION BY pr.symbol_pk, pr.interval_pk
+			    ORDER BY pr.dt
+			)) / LAG(pr.adj_close) OVER (
+			    PARTITION BY pr.symbol_pk, pr.interval_pk
+			    ORDER BY pr.dt
+			) * 100
+		END AS perc
+	FROM stock.prices AS pr
 )
 
 SELECT
@@ -73,6 +99,7 @@ SELECT
 	sy.title,
 	pr.dt,
 	intv.interval,
+	pc.perc,
 	pr.opening,
 	pr.high,
 	pr.low,
@@ -96,9 +123,17 @@ LEFT JOIN moving_average_cte AS ma
 	AND pr.dt = ma.dt
 
 -- percentage changes
+LEFT JOIN percentage_change_cte AS pc
+	ON pr.symbol_pk = pc.symbol_pk
+	AND pr.interval_pk = pc.interval_pk
+	AND pr.dt = pc.dt
 ;
 
--- crypto prices
+-- =====================================================================
+-- CRYPTO
+-- =====================================================================
+
+-- Crypto Prices
 CREATE MATERIALIZED VIEW IF NOT EXISTS crypto.prices_matv AS
 SELECT
 	sy.symbol,
