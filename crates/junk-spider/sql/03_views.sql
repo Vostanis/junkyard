@@ -23,21 +23,79 @@ INNER JOIN stock.acc_stds AS acc
 
 -- stock prices
 CREATE MATERIALIZED VIEW IF NOT EXISTS stock.prices_matv AS
+
+-- preprocess 2nd gen metrics
+WITH 
+-- moving averages for volume & price
+moving_average_cte AS (
+SELECT
+        pr.symbol_pk,
+        pr.interval_pk,
+        pr.dt,
+        pr.volume,
+	AVG(pr.volume) OVER (
+		PARTITION BY pr.symbol_pk, pr.interval_pk
+		ORDER BY pr.dt
+		ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+	) as volume_7ma,
+	AVG(pr.volume) OVER (
+		PARTITION BY pr.symbol_pk, pr.interval_pk
+		ORDER BY pr.dt
+		ROWS BETWEEN 90 PRECEDING AND CURRENT ROW
+	) as volume_90ma,
+	AVG(pr.volume) OVER (
+		PARTITION BY pr.symbol_pk, pr.interval_pk
+		ORDER BY pr.dt
+		ROWS BETWEEN 365 PRECEDING AND CURRENT ROW
+	) as volume_365ma
+FROM stock.prices AS pr
+)
+
+-- price change percentages; per interval
+price_change_cte AS (
+SELECT
+	pr.symbol_pk,
+	pr.interval_pk,
+	pr.dt,
+	pr.adj_close,
+        (pr.adj_close - LAG(pr.adj_close) OVER (
+            PARTITION BY pr.symbol_pk, pr.interval_pk
+            ORDER BY pr.datetime
+        )) / LAG(pr.adj_close) OVER (
+            PARTITION BY pr.symbol_pk, pr.interval_pk
+            ORDER BY pr.datetime
+        ) * 100 AS adj_close_pct_change
+FROM stock.prices as pr
+)
+
 SELECT
 	sy.symbol,
 	sy.title,
-	iv.interval,
+	pr.dt,
+	intv.interval,
 	pr.opening,
 	pr.high,
 	pr.low,
 	pr.closing,
 	pr.adj_close,
-	pr.volume
+	pr.volume,
+	ma.volume_7ma,
+	ma.volume_90ma,
+	ma.volume_365ma
+	
 FROM stock.symbols AS sy
 INNER JOIN stock.prices AS pr
 	ON sy.pk = pr.symbol_pk
-INNER JOIN common.intervals AS iv
-	ON iv.pk = pr.interval_pk
+INNER JOIN common.intervals AS intv
+	ON intv.pk = pr.interval_pk
+
+-- moving averages
+LEFT JOIN moving_average_cte AS ma
+	ON pr.symbol_pk = ma.symbol_pk
+	AND pr.interval_pk = ma.interval_pk
+	AND pr.dt = ma.dt
+
+-- percentage changes
 ;
 
 -- crypto prices

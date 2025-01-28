@@ -9,7 +9,6 @@ use ordered_float::OrderedFloat;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::hash::DefaultHasher;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -33,7 +32,7 @@ impl Process {
         trace!("fetching tickers ...");
         let tickers: Vec<Ticker> = pg_client
             .query(
-                "SELECT pk, file_code, symbol, title FROM stock.symbols LIMIT 1",
+                "SELECT pk, file_code, symbol, title FROM stock.symbols",
                 &[],
             )
             .await
@@ -74,8 +73,10 @@ impl Process {
     }
 }
 
-// scrape
-// -------------------------------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////////////////
+// -- SCRAPE --
+////////////////////////////////////////////////////////////////////////////////////////////
+
 pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     // return all tickers from the database
     if tui {
@@ -221,7 +222,10 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                                                     if let Some(start_date) = cell.start_date {
                                                         Some(convert_date_type(&start_date)
                                                             .expect("failed to convert date type"))
-                                                    } else { None }},
+                                                    } else { 
+                                                        None 
+                                                    }
+                                                },
                                                 end_date: convert_date_type(&cell.end_date)
                                                     .expect("failed to convert date type"),
                                                 filing_date: convert_date_type(&cell.filing_date)
@@ -304,11 +308,6 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                     .filter(|row| {
                         !exists.contains(&row.pk())
                     })
-                    // .map(|row| {
-                    //     if row = MetricPrimaryKey{10545, 2189, 2, 2009-06-27, 2010-07-21, Q3, 10-Q, 0, 0001193125-10-162840} {
-                    //     println!("{:?}", row);
-                    //     }
-                    // })
                     .collect();
 
                 drop(exists);
@@ -405,8 +404,9 @@ struct Ticker {
     title: String,
 }
 
-// de
-// -------------------------------------------------------------------------------------------------
+/////////////////////////////////////////////////////////////////////////////////////////////
+// -- DESERIALIZE --
+/////////////////////////////////////////////////////////////////////////////////////////////
 
 // Output
 // ======
@@ -429,19 +429,19 @@ struct Ticker {
 //      ...
 // ]
 #[derive(Debug, Hash, PartialEq, Eq)]
-struct Metric {
-    symbol_pk: i32,
-    metric_pk: i32,
-    acc_pk: i32,
-    start_date: Option<chrono::NaiveDate>,
-    end_date: chrono::NaiveDate,
-    filing_date: chrono::NaiveDate,
-    year: i16,
-    period: String,
-    form: String,
-    val: OrderedFloat<f64>,
-    accn: String,
-    frame: Option<String>,
+pub struct Metric {
+    pub symbol_pk: i32,
+    pub metric_pk: i32,
+    pub acc_pk: i32,
+    pub start_date: Option<chrono::NaiveDate>,
+    pub end_date: chrono::NaiveDate,
+    pub filing_date: chrono::NaiveDate,
+    pub year: i16,
+    pub period: String,
+    pub form: String,
+    pub val: OrderedFloat<f64>,
+    pub accn: String,
+    pub frame: Option<String>,
 }
 
 impl Metric {
@@ -462,17 +462,17 @@ impl Metric {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq)]
-struct MetricPrimaryKey {
-    symbol_pk: i32,
-    metric_pk: i32,
-    acc_pk: i32,
-    end_date: chrono::NaiveDate,
-    filing_date: chrono::NaiveDate,
-    year: i16,
-    period: String,
-    form: String,
-    val: OrderedFloat<f64>,
-    accn: String,
+pub struct MetricPrimaryKey {
+    pub symbol_pk: i32,
+    pub metric_pk: i32,
+    pub acc_pk: i32,
+    pub end_date: chrono::NaiveDate,
+    pub filing_date: chrono::NaiveDate,
+    pub year: i16,
+    pub period: String,
+    pub form: String,
+    pub val: OrderedFloat<f64>,
+    pub accn: String,
 }
 
 /// Execute the COPY statement, inserting the data into the database.
@@ -611,3 +611,4 @@ struct DataCell {
 //          }
 //      }
 // }
+

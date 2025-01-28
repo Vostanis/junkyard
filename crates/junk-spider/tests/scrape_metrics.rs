@@ -9,8 +9,6 @@ use std::hash::Hash;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-// const PLACEHOLDER_PK: i32 = 1_000_000;
-
 #[tokio::test]
 async fn scrape_metrics() {
     // -- OPEN PG CONNECTION --

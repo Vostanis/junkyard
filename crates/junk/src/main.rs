@@ -52,13 +52,14 @@ async fn main() -> anyhow::Result<()> {
         Spider { endpoints } => {
             // if no endpoints provided, scrape all
             match endpoints {
-                Some(endpoints) => spider::run(endpoints).await?,
-                None => spider::run(vec![Crypto, Econ, Stocks]).await?,
+                Some(endpoints) => spider::run(endpoints, tui).await?,
+                None => spider::run(vec![Crypto, Econ, Stocks], tui).await?,
             }
         }
 
         // test env
         Test => {
+            use junk_spider::stock::common::Ticker;
             use junk_spider::*;
 
             trace!("creating postgres connection pool config");
@@ -75,15 +76,14 @@ async fn main() -> anyhow::Result<()> {
             )?;
             debug!("findump connection pool established");
 
-            // crypto::mexc::scrape(&pool, tui).await?;
-            // crypto::kraken::scrape(&pool, tui).await?;
-            // crypto::binance::scrape(&pool, tui).await?;
-            // crypto::kucoin::scrape(&pool, tui).await?;
+            let ticker = Ticker {
+                pk: 10546,
+                ticker: String::from("NVDA"),
+                title: String::from("NVIDIA Corp."),
+                file_code: String::from("0001045810"),
+            };
 
-            // stock::sec::bulks::scrape(tui).await?;
-            // stock::sec::tickers::scrape(&pool, tui).await?;
-            // stock::yahoo_finance::scrape(&pool, tui).await?;
-            stock::sec::metrics::scrape(&pool, tui).await?;
+            stock::sec_metrics_transform::Insinuator::new(&pool, &ticker).await?;
         }
     }
 
