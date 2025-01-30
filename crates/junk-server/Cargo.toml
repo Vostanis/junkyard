@@ -8,4 +8,9 @@ readme.workspace = true
 
 [dependencies]
 actix-web = "4.9.0"
-sqlite = "0.36.1"
+deadpool-postgres.workspace = true
+dotenv.workspace = true
+serde.workspace = true
+tokio-postgres.workspace = true
+utoipa = "5.3.1"
+utoipa-redoc = { version = "6.0.0", features = ["actix-web"] }
