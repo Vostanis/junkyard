@@ -109,7 +109,7 @@ SELECT
 	ma.volume_7ma,
 	ma.volume_90ma,
 	ma.volume_365ma
-	
+
 FROM stock.symbols AS sy
 INNER JOIN stock.prices AS pr
 	ON sy.pk = pr.symbol_pk
@@ -135,21 +135,92 @@ LEFT JOIN percentage_change_cte AS pc
 
 -- Crypto Prices
 CREATE MATERIALIZED VIEW IF NOT EXISTS crypto.prices_matv AS
+WITH 
+
+-- moving averages for volume & price (adj. close), per 7, 90, and 365 x interval
+moving_average_cte AS (
+	SELECT
+		pr.symbol_pk,
+		pr.interval_pk,
+		pr.source_pk,
+		pr.dt,
+		pr.volume,
+		AVG(pr.volume) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk, pr.source_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+		) AS volume_7ma,
+		AVG(pr.volume) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk, pr.source_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 89 PRECEDING AND CURRENT ROW
+		) AS volume_90ma,
+		AVG(pr.volume) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk, pr.source_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+		) AS volume_365ma
+	FROM crypto.prices AS pr
+),
+
+-- price (adj. close) change percentages, per interval
+percentage_change_cte AS (
+	SELECT
+		pr.symbol_pk,
+		pr.interval_pk,
+		pr.source_pk,
+		pr.dt,
+		pr.closing,
+		CASE
+			-- error case: division by zero
+			WHEN LAG(pr.closing) OVER (
+			    PARTITION BY pr.symbol_pk, pr.interval_pk, pr.source_pk
+			    ORDER BY pr.dt
+			) = 0 THEN NULL
+			ELSE (pr.closing - LAG(pr.closing) OVER (
+			    PARTITION BY pr.symbol_pk, pr.interval_pk, pr.source_pk
+			    ORDER BY pr.dt
+			)) / LAG(pr.closing) OVER (
+			    PARTITION BY pr.symbol_pk, pr.interval_pk, pr.source_pk
+			    ORDER BY pr.dt
+			) * 100
+		END AS perc
+	FROM crypto.prices AS pr
+)
 SELECT
 	sy.symbol,
 	so.source,
-	iv.interval,
+	pr.dt,
+	intv.interval,
+	pc.perc,
 	pr.opening,
 	pr.high,
 	pr.low,
 	pr.closing,
 	pr.volume,
+	ma.volume_7ma,
+	ma.volume_90ma,
+	ma.volume_365ma,
 	pr.trades
 FROM crypto.symbols AS sy
 INNER JOIN crypto.prices AS pr
 	ON sy.pk = pr.symbol_pk
 INNER JOIN crypto.sources AS so
 	ON so.pk = pr.source_pk
-INNER JOIN common.intervals AS iv
-	ON iv.pk = pr.interval_pk
+INNER JOIN common.intervals AS intv
+	ON intv.pk = pr.interval_pk
+
+-- moving averages
+LEFT JOIN moving_average_cte AS ma
+	ON pr.symbol_pk = ma.symbol_pk
+	AND pr.interval_pk = ma.interval_pk
+	AND pr.source_pk = ma.source_pk
+	AND pr.dt = ma.dt
+
+-- percentage changes
+LEFT JOIN percentage_change_cte AS pc
+	ON pr.symbol_pk = pc.symbol_pk
+	AND pr.interval_pk = pc.interval_pk
+	AND pr.source_pk = pc.source_pk
+	AND pr.dt = pc.dt
 ;

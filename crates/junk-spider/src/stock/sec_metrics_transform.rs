@@ -1,88 +1,107 @@
-use super::common::Ticker;
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
+use super::common::{Ticker, Tickers};
 use super::sec_metrics::Metric;
 use chrono::NaiveDate;
+use futures::{stream, StreamExt};
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 
-/// The following process takes all Annual & Quarterly recordings, and insinuates any missing
-/// Quarterly datapoints.
+/// ### Methodology
 ///
-/// Tree {
-///     (2023-01-01, 2023-12-31): {
-///         metric_pk(1): {
-///             (Annual Metric, Set<Metric>)
-///         },
-///         metric_pk(2): {
-///             (Annual Metric, Set<Metric>)
-///         }
-///     },
-/// }
-#[derive(Debug)]
-pub struct Insinuator {
-    tree: HashMap<DateRange, HashMap<i32, (Metric, HashSet<Metric>)>>,
+/// 1. Loop through the tickers.
+///
+/// 2. Loop through the 10-K metrics, per ticker.
+///
+/// 3. Has the metric been used yet? If no, create it.
+///
+///         HashMap<i32, AnnualMetric>
+///
+/// 4. Within the HashMap, there is the 10-K date ranges.
+///    Does the date range exist? If no, create it.
+///
+///         HashMap<(NaiveDate, NaiveDate), HashSet<f64>>
+struct Tree {
+    inner: HashMap<i32, AnnualMetric>,
 }
 
-/// A range of chrono::NaiveDates.
-///
-/// DateRange {
-///    start_date: NaiveDate,
-///    end_date: NaiveDate,
-/// }
-#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct DateRange {
-    start_date: NaiveDate,
-    end_date: NaiveDate,
+async fn run(pool: &deadpool_postgres::Pool) -> anyhow::Result<()> {
+    let tickers = Tickers::fetch_tickers(pool).await?;
+
+    stream::iter(tickers.0)
+        .for_each_concurrent(num_cpus::get(), |stock| {
+            // per ticker, build a tree, calculate missing values,
+            // and then COPY them to the pg database
+            async move {
+                let mut tree = Tree::new();
+                tree.fetch_annuals(stock, pool).await.unwrap();
+                // tr.fetch_quarterlies(stock, tree).await?;
+            }
+        })
+        .await;
+
+    Ok(())
 }
 
-impl Insinuator {
-    /// Build an Insinuator by pulling PostgreSQL queries and organising them by their `DateRange`.
-    pub async fn new(pool: &deadpool_postgres::Pool, ticker: &Ticker) -> anyhow::Result<()> {
-        let pg_client = pool.get().await.expect("failed to get pg client from pool");
+impl Tree {
+    /// Create a new Tree.
+    fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
 
-        // initialise the tree with all the annual Metrics and their date ranges
-        let mut tree: HashMap<DateRange, (Metric, HashSet<Metric>)> = HashMap::new();
-        let _ = pg_client
-            .query(
-                "
-                SELECT * FROM stock.metrics
-                WHERE 
-                    symbol_pk = $1 
-                    AND
-                    form = $2 
-                    AND
-                    start_date IS NOT NULL
-                ",
-                &[&ticker.pk, &"10-K"],
-            )
+    /// Insert the Annual metrics into the Tree.
+    async fn fetch_annuals(
+        &mut self,
+        stock: Ticker,
+        pool: &deadpool_postgres::Pool,
+    ) -> anyhow::Result<()> {
+        let pg_rows = pool
+            .get()
             .await?
-            .iter()
-            .map(|row| {
-                let metric = Metric {
-                    symbol_pk: row.get(0),
-                    metric_pk: row.get(1),
-                    acc_pk: row.get(2),
-                    start_date: row.get(3),
-                    end_date: row.get(4),
-                    filing_date: row.get(5),
-                    year: row.get(6),
-                    period: row.get(7),
-                    form: row.get(8),
-                    val: OrderedFloat(row.get(9)),
-                    accn: row.get(10),
-                    frame: row.get(11),
-                };
-                tree.insert(
-                    DateRange {
-                        start_date: metric.start_date.expect("failed to get start_date"),
-                        end_date: metric.end_date,
-                    },
-                    (metric, HashSet::new()),
-                );
-            })
-            .collect::<Vec<_>>();
-
-        println!("{tree:#?}");
+            .query(
+                "SELECT * FROM stock.metrics 
+                WHERE symbol_pk = $1
+                AND form = $2",
+                &[&stock.pk],
+            )
+            .await?;
 
         Ok(())
+    }
+
+    /// Sort and insert the Quarterly metrics into the Tree.
+    async fn fetch_quarterlies(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct AnnualMetric {
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    total: f64,
+    values: HashSet<f64>,
+}
+
+impl AnnualMetric {
+    /// Calculate the difference between the total and the sum of the values.
+    fn calc(&self) -> f64 {
+        self.total - self.values.iter().sum::<f64>()
+    }
+
+    /// Check if a metric is within the date range.
+    fn check(&self, metric: &Metric) -> bool {
+        // unwrap Option<NaiveDate>
+        if let Some(start_date) = metric.start_date {
+            start_date >= self.start_date && metric.end_date <= self.end_date
+        } else {
+            // if Option<NaiveDate> returns None, there has been an error in retrieving
+            // from Postgres
+            tracing::error!("'start_date' column found to be empty for {:?}", self);
+            false
+        }
     }
 }

@@ -1,0 +1,8 @@
+[package]
+name = "junk-tui"
+edition = "2021"
+version.workspace = true
+readme.workspace = true
+
+[dependencies]
+ratatui = "0.29.0"

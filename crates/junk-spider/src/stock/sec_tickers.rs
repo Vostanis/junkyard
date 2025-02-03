@@ -9,9 +9,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, trace};
 
-// scrape
-// ----------------------------------------------------------------------------
-
 pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     let client = build_client();
 

@@ -21,6 +21,11 @@ pub(crate) async fn run(endpoints: Vec<Endpoint>, tui: bool) -> anyhow::Result<(
     )?;
     debug!("findump connection pool established");
 
+    // let pool = sqlx::postgres::PgPoolOptions::new()
+    //     .max_connections(num_cpus::get())
+    //     .connect(&var("FINDUMP_URL")?)
+    //     .await?;
+
     // start collecting data
     let time = std::time::Instant::now();
     for endpoint in endpoints {
@@ -57,7 +62,7 @@ pub(crate) async fn run(endpoints: Vec<Endpoint>, tui: bool) -> anyhow::Result<(
                 // stock::sec_bulks::scrape(tui).await?;
                 stock::sec_tickers::scrape(&pool, tui).await?;
                 stock::yahoo_finance::scrape(&pool, tui).await?;
-                // stock::sec_metrics::scrape(&pool, tui).await?;
+                stock::sec_metrics::scrape(&pool, tui).await?;
 
                 info!("stock data collected, time elapsed: {:?}", time.elapsed());
             }
