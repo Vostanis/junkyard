@@ -9,9 +9,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, trace};
 
-// scrape
-// ----------------------------------------------------------------------------
-
 pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     let client = build_client();
 
@@ -60,11 +57,11 @@ struct Tickers(Vec<Ticker>);
 // Individual stock behaviour; i.e., each ticker in the list needs to process price & metrics
 // data (and any tertiary data) separately.
 #[derive(Clone, Debug, Deserialize)]
-struct Ticker {
+pub struct Ticker {
     #[serde(rename = "cik_str", deserialize_with = "de_cik")]
-    cik: String,
-    ticker: String,
-    title: String,
+    pub pk: String,
+    pub ticker: String,
+    pub title: String,
 }
 
 struct TickerVisitor;
@@ -132,7 +129,7 @@ impl Tickers {
         // iterate over the data stream and execute pg rows
         let mut stream = stream::iter(&self.0);
         while let Some(cell) = stream.next().await {
-            let path = format!("./buffer/submissions/CIK{}.json", cell.cik);
+            let path = format!("./buffer/submissions/CIK{}.json", cell.pk);
             let file: Sic = match crate::fs::read_json(&path).await {
                 Ok(data) => data,
                 Err(err) => {
@@ -150,7 +147,7 @@ impl Tickers {
                     .execute(
                         &query,
                         &[
-                            &cell.cik,
+                            &cell.pk,
                             &cell.ticker,
                             &cell.title.to_uppercase(),
                             &file.sic_description,

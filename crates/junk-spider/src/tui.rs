@@ -17,7 +17,7 @@ pub(crate) fn multi_progress(
         ProgressBar::new(len as u64).with_style(
             ProgressStyle::default_bar()
                 .template(
-                    "collecting crypto prices ... {spinner:.magenta}\n \
+                    "{spinner:.magenta}\n \
                         {msg:>9.white} |{bar:57.white/grey}| {pos:<2} / {human_len} \
                         ({percent_precise}%) [Time: {elapsed}, Rate: {per_sec}, ETA: {eta}]",
                 )?

@@ -1,7 +1,7 @@
-#![allow(dead_code)]
-
+use deadpool_postgres::Pool;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Deserializer};
-use tracing::error;
+use tracing::{error, trace};
 
 /// Used within the SEC datasets; each company is given a CIK code (and ticker, and title),
 /// intended to be a 10-character string.
@@ -46,4 +46,44 @@ pub fn convert_timestamp(timestamp: u32) -> chrono::NaiveDate {
     chrono::DateTime::from_timestamp(timestamp.into(), 0)
         .expect("Expected Vector of Timestamp integers")
         .date_naive()
+}
+
+/// List of all tickers in the database.
+pub struct Tickers(pub Vec<Ticker>);
+
+/// Individual ticker information.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Ticker {
+    pub pk: i32,
+    pub file_code: String,
+    pub ticker: String,
+    pub title: String,
+}
+
+impl Tickers {
+    /// Fetch all tickers from the database.
+    pub async fn fetch_tickers(pool: &Pool) -> anyhow::Result<Self> {
+        // wait for a pg client from the pool
+        let pg_client = pool.get().await.expect("failed to get pg client from pool");
+
+        // return all tickers from the database
+        trace!("fetching tickers ...");
+        let tickers: Vec<Ticker> = pg_client
+            .query(
+                "SELECT pk, file_code, symbol, title FROM stock.symbols",
+                &[],
+            )
+            .await
+            .expect("failed to fetch stock.tickers")
+            .into_par_iter()
+            .map(|row| Ticker {
+                pk: row.get(0),
+                file_code: row.get(1),
+                ticker: row.get(2),
+                title: row.get(3),
+            })
+            .collect();
+
+        Ok(Tickers(tickers))
+    }
 }

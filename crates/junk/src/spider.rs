@@ -1,61 +1,68 @@
 use crate::cli::Endpoint;
+use deadpool_postgres::{ManagerConfig, RecyclingMethod};
 use dotenv::var;
 // use junk_spider as spider;
-use tokio_postgres::{self as pg, NoTls};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, info, trace};
 
 /// Run all working spider processes.
-pub(crate) async fn run(endpoints: Vec<Endpoint>) -> anyhow::Result<()> {
-    // 1. build pg connection
-    trace!("connecting to findump ...");
-    let (_pg_client, pg_conn) = pg::connect(
-        &var("FINDUMP_URL").expect("environment variable FINDUMP_URL"),
-        NoTls,
-    )
-    .await
-    .map_err(|err| {
-        error!("findump connection error: {}", err);
-        err
-    })?;
-
-    tokio::spawn(async move {
-        if let Err(err) = pg_conn.await {
-            error!("findump connection error: {}", err);
-        }
+pub(crate) async fn run(endpoints: Vec<Endpoint>, tui: bool) -> anyhow::Result<()> {
+    // 1. build pg pool connection
+    trace!("creating postgres connection pool config");
+    let mut pg_config = deadpool_postgres::Config::new();
+    pg_config.url = Some(var("FINDUMP_URL")?);
+    pg_config.manager = Some(ManagerConfig {
+        recycling_method: RecyclingMethod::Fast,
     });
-    debug!("findump connection established");
+
+    trace!("creating findump connection pool");
+    let pool = pg_config.create_pool(
+        Some(deadpool_postgres::Runtime::Tokio1),
+        tokio_postgres::NoTls,
+    )?;
+    debug!("findump connection pool established");
+
+    // let pool = sqlx::postgres::PgPoolOptions::new()
+    //     .max_connections(num_cpus::get())
+    //     .connect(&var("FINDUMP_URL")?)
+    //     .await?;
 
     // start collecting data
     let time = std::time::Instant::now();
     for endpoint in endpoints {
         match endpoint {
             Endpoint::Crypto => {
+                use junk_spider::crypto;
+
                 let time = std::time::Instant::now();
 
-                // spider::crypto::binance::scrape(&mut pg_client).await?;
-                // spider::crypto::kucoin::scrape(&mut pg_client).await?;
-                // spider::crypto::mexc::scrape(&mut pg_client).await?;
-                // spider::crypto::kraken::scrape(&mut pg_client).await?;
+                crypto::mexc::scrape(&pool, tui).await?;
+                crypto::kraken::scrape(&pool, tui).await?;
+                crypto::binance::scrape(&pool, tui).await?;
+                crypto::kucoin::scrape(&pool, tui).await?;
 
                 info!("crypto data collected, time elapsed: {:?}", time.elapsed());
             }
+
             Endpoint::Econ => {
+                // use junk_spider::econ;
                 let time = std::time::Instant::now();
 
-                // spider::econ::fred::scrape(&pool).await?;
+                // econ::fred::scrape(&pool).await?;
 
                 info!(
                     "economic data collected, time elapsed: {:?}",
                     time.elapsed()
                 );
             }
+
             Endpoint::Stocks => {
+                use junk_spider::stock;
                 let time = std::time::Instant::now();
 
-                // spider::stock::sec::bulks::scrape().await?;
-                // spider::stock::sec::tickers::scrape(&mut pg_client).await?;
-                // spider::stock::sec::metrics::scrape(&mut pg_client).await?;
-                // spider::stock::yahoo_finance::scrape(&mut pg_client).await?;
+                // stock::sec_bulks::scrape(tui).await?;
+                // stock::sec_tickers::scrape(&pool, tui).await?;
+                // stock::yahoo_finance::scrape(&pool, tui).await?;
+                stock::sec_metrics::scrape(&pool, tui).await?;
 
                 info!("stock data collected, time elapsed: {:?}", time.elapsed());
             }
