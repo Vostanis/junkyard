@@ -1,9 +1,10 @@
 mod rest_api;
 
+use actix_files as fs;
+use actix_web::{middleware::Logger, web, App, HttpServer};
 use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
 use dotenv::{dotenv, var};
 use tokio_postgres::NoTls;
-use actix_web::{web, middleware::Logger, App, HttpServer};
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
 
@@ -37,6 +38,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(pool.clone()))
             .service(rest_api::index)
             .service(Redoc::with_url("/redoc", ApiDoc::openapi()))
+            .service(fs::Files::new("/static", "./static").show_files_listing())
     })
     .bind(("127.0.0.1", 11234))?
     .run()
