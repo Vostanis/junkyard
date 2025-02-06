@@ -1,11 +1,11 @@
-// use crate::pages::Page;
+use crate::pages::Page;
 
 pub type AppResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Debug)]
 pub struct App {
     pub active: bool,
-    // pub current_page: Page,
+    pub current_page: Page,
     pub tab_counter: u8,
     pub search: bool,
 }
@@ -14,7 +14,7 @@ impl Default for App {
     fn default() -> Self {
         Self {
             active: true,
-            // current_page: Page::Home,
+            current_page: Page::Home,
             tab_counter: 0,
             search: false,
         }

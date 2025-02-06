@@ -20,6 +20,7 @@ pub enum Event {
 /// See [ratatui
 /// example](https://github.com/ratatui/templates/blob/main/simple-async/src/event.rs);
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct EventHandler {
     sx: mpsc::UnboundedSender<Event>,
     rx: mpsc::UnboundedReceiver<Event>,

@@ -1,18 +1,18 @@
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 
-use crate::{
+use junk_tui::{
     app::{App, AppResult},
     event::{Event, EventHandler},
     handler::handle_key_events,
     tui::Tui,
 };
 
-pub mod app;
-pub mod event;
-pub mod handler;
-pub mod tui;
-pub mod ui;
+// pub mod app;
+// pub mod event;
+// pub mod handler;
+// pub mod tui;
+// pub mod ui;
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
