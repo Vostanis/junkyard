@@ -5,4 +5,9 @@ version.workspace = true
 readme.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+color-eyre = "0.6.3"
+crossterm = { version = "0.28.1", features = ["event-stream"] }
+futures.workspace = true
 ratatui = "0.29.0"
+tokio = { workspace = true, features = ["time"] }
