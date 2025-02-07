@@ -1,7 +1,10 @@
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum Page {
-    Crypto,
+    #[default]
     Home,
-    Stock,
+    Login,
+    CryptoDashboard,
+    EconDashboard,
+    StockDashboard,
     Screener,
 }

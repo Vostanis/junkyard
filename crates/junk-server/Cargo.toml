@@ -12,6 +12,8 @@ actix-web = "4.9.0"
 deadpool-postgres.workspace = true
 dotenv.workspace = true
 serde.workspace = true
+sqlx.workspace = true
+tera = "1.20.0"
 tokio-postgres.workspace = true
 utoipa = "5.3.1"
 utoipa-redoc = { version = "6.0.0", features = ["actix-web"] }

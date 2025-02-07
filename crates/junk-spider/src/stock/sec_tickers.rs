@@ -52,7 +52,7 @@ fn build_client() -> HttpClient {
 // ----------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct Tickers(Vec<Ticker>);
+pub struct Tickers(Vec<Ticker>);
 
 // Individual stock behaviour; i.e., each ticker in the list needs to process price & metrics
 // data (and any tertiary data) separately.

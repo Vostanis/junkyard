@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tickers</title>
+</head>
+<body>
+    <h1>Stock Dashboard</h1>
+    <form action="/search" method="get">
+        <input type="text" name="symbol" placeholder="Enter stock symbol (e.g., AAPL)" required>
+        <button type="submit">Search</button>
+    </form>
+
+    <div>
+        <p>tickers: {{ tickers }}</p>
+    </div>
+</body>
+</html>

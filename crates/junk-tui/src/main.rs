@@ -8,15 +8,11 @@ use junk_tui::{
     tui::Tui,
 };
 
-// pub mod app;
-// pub mod event;
-// pub mod handler;
-// pub mod tui;
-// pub mod ui;
-
 #[tokio::main]
 async fn main() -> AppResult<()> {
-    let mut app = App::new();
+    dotenv::dotenv().ok();
+
+    let mut app = App::new().await;
 
     let backend = CrosstermBackend::new(io::stdout());
     let terminal = Terminal::new(backend)?;
