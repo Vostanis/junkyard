@@ -9,15 +9,25 @@ struct Ticker {
     industry: String,
 }
 
+/// Backend for the home page.
+///
+/// All dataset symbols are loaded in to allow for searching.
 #[get("/home")]
 pub async fn home(pool: web::Data<sqlx::PgPool>, tera: web::Data<Tera>) -> impl Responder {
-    match sqlx::query_as::<_, Ticker>("SELECT pk, symbol, title, industry FROM stock.symbols")
+    match sqlx::query_as::<_, Ticker>(r#"
+    SELECT 
+        pk, 
+        symbol, 
+        REGEXP_REPLACE(title, '[''\\\/]', '', 'g') AS title, 
+        REGEXP_REPLACE(industry, '[''\\\/]', '', 'g') AS industry
+    FROM stock.symbols"#)
         .fetch_all(pool.get_ref())
         .await
     {
         Ok(tickers) => {
             let mut context = Context::new();
-            context.insert("tickers", &tickers);
+            let tickers_json = serde_json::to_string(&tickers).expect("Failed to serialize tickers");
+            context.insert("tickers", &tickers_json);
             let rendered = tera
                 .render("home.html", &context)
                 .expect("failed to render home");
@@ -27,23 +37,45 @@ pub async fn home(pool: web::Data<sqlx::PgPool>, tera: web::Data<Tera>) -> impl 
     }
 }
 
-#[get("/stock/{asset}")]
+#[derive(sqlx::FromRow, serde::Serialize, serde::Deserialize)]
+pub struct Metric {
+    pub end_date: chrono::NaiveDate,
+    pub val: f64,
+}
+
+/// Backend for an individual stock's dashboard.
+#[get("/asset/{symbol}")]
 pub async fn stock_dashboard(
+    symbol: web::Path<String>,
     pool: web::Data<sqlx::PgPool>,
     tera: web::Data<Tera>,
 ) -> impl Responder {
-    match sqlx::query_as::<_, Ticker>("SELECT pk, symbol, title, industry FROM stock.symbols")
-        .fetch_all(pool.get_ref())
-        .await
+    let symbol = symbol.into_inner();
+
+    match sqlx::query_as::<_, Metric>(
+        "
+        SELECT end_date, val 
+        FROM stock.metrics_matv 
+        WHERE symbol = $1 AND metric = 'Revenues'
+        ORDER BY end_date DESC
+    ",
+    )
+    .bind(&symbol)
+    .fetch_all(pool.get_ref())
+    .await
     {
-        Ok(tickers) => {
+        Ok(revenue) => {
             let mut context = Context::new();
-            context.insert("tickers", &tickers);
+            context.insert("revenue", &revenue);
+            context.insert("title", "hellooooo");
             let rendered = tera
-                .render("home.html", &context)
-                .expect("failed to render home");
+                .render("stock_dashboard.html", &context)
+                .expect("failed to render stock_dashboard");
             HttpResponse::Ok().content_type("text/html").body(rendered)
         }
-        Err(_) => HttpResponse::InternalServerError().body("Failed to fetch stock symbol"),
+        Err(e) => {
+            tracing::error!("{e}");
+            HttpResponse::InternalServerError().body("Failed to fetch stock data")
+        }
     }
 }

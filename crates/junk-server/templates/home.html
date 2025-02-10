@@ -3,13 +3,128 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home</title>
+    <title>assetlib</title>
+    <style>
+        body {
+	    	font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            flex-direction: column;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        input {
+	    	font-family: 'JetBrains Mono', monospace;
+            width: 400px;
+        }
+        button {
+            margin-top: 5px;
+        }
+		ul {
+		list-style: none;
+		text-align: center;
+		margin: 0;
+		padding: 0;
+		}
+		li {
+		color: #666;
+		strong { color: #000; }
+		+ .label { margin-top: 1rem; }
+		&.label {
+			color: #CCC;
+			text-transform: uppercase;
+			font-size: 0.8em;
+			letter-spacing: 0.0125em;
+			margin-bottom: 0.25rem;
+		}
+		}
+    </style>
 </head>
 <body>
-    <h1>Search for an asset</h1>
-    <form action="/search" method="get">
-        <input type="text" name="symbol" placeholder="Enter stock symbol (e.g., AAPL, BTCUSDT)" required>
-        <button type="submit">Search</button>
+    <!-- <img src="static/junkyard.jpg" alt="Junkyard Photo" style="max-width: 100%; height: auto;"> -->
+    <h1>asset.lib</h1>
+    <form id="searchForm" method="get">
+        <input type="text" id="symbolInput" placeholder="Search assets (e.g., AAPL, BTCUSDT)" required>
+        <!-- <button type="submit">Search</button> -->
+	<ul id="list"></ul>
     </form>
+
+	<script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+
+    <script>
+		// Tickers data passed from the backend
+		const tickers_json = '{{ tickers | safe }}';
+		const tickers = JSON.parse(tickers_json);
+		console.log(tickers);
+
+		var symbolInput = document.querySelector("#symbolInput"),
+			list = document.querySelector("#list");
+			// lib = tickers;
+
+		// Initialize Fuse.js
+		const fuseOptions = {
+			includeScore: true,
+			includeMatches: true,
+			threshold: 0.3, // Adjust this value to control the fuzziness
+			keys: ['symbol', 'title', 'industry'] // Search through the entire string
+		};
+		const fuse = new Fuse(tickers, fuseOptions);
+
+		symbolInput.addEventListener("keyup", onKeydown);
+
+		function onKeydown(e) {
+			if (!e.target.value) {
+				list.innerHTML = '';
+				return;
+			}
+			const results = fuse.search(e.target.value);
+			outputSearchResults(results);
+		}
+
+		function outputSearchResults(results) {
+			// Clear list
+			list.innerHTML = '';
+
+			// No results found
+			if (results.length === 0) {
+				list.innerHTML = '<li>No matches found</li>';
+				return;
+			}
+
+			// Label 'Matches'
+			label(list, 'Matches');
+
+			// Show results
+			results.forEach((result) => {
+				const el = document.createElement('li');
+                el.innerHTML = `
+                    <strong>${result.item.symbol}</strong> - ${result.item.title} (${result.item.industry})
+                `;
+				// el.innerHTML = `<strong>${result.item}</strong>`;
+				
+				list.appendChild(el);
+			});
+		}
+
+		function label(list, text) {
+			const line = document.createElement('li');
+			line.innerHTML = text;
+			line.className = 'label';
+			list.appendChild(line);
+		}
+
+		// function library() {
+		// 	return [
+		// 		'illamon', 'fragment', 'latterly', 'dysgenics', 'zupus', 'lecuona', 'gawkiness', 'unspiced', 'lymphoma', 'payable', 'befouler', 'tribune', 'hespera', 'natality', 'chowhound', 'norene', 'kelebe', 'datolite', 'splay', 'convey', 'sita', 'artemisia', 'gasolene', 'epicurean', 'pretext', 'deschutes', 'elkanah', 'cantal', 'jar', 'portiere', 'trainpipe', 'limbate', 'silage', 'cissy', 'nip', 'fubsiest', 'inhale', 'fusilier', 'unfunded', 'yapper', 'scheele', 'jiva', 'saturator', 'catalyst', 'telephony', 'abby', 'kazachok', 'tuileries', 'judah', 'boiardo', 'unlotted', 'terry', 'charvaka', 'beguiler', 'thorburn', 'speiss', 'similarly', 'target', 'overcame', 'unshaking', 'pyrexia', 'mangonel', 'heath', 'monaural', 'proexpert', 'strobila', 'subchaser', 'daric', 'gregg', 'rattly', 'ladd', 'unrayed', 'kastro', 'metol', 'syce', 'mood', 'rsvp', 'hornsby', 'perutz', 'steeper', 'tephrite', 'flabbier', 'kikuyu', 'slopshop', 'marciano', 'packer', 'ungalled', 'grenfell', 'crosstree', 'horrocks', 'pulpiest', 'evert', 'unscribed', 'shamrock', 'promote', 'raking', 'kahuna', 'glassy', 'tippable'
+		// 	];
+		// }
+	</script>
 </body>
 </html>

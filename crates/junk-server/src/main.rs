@@ -10,8 +10,9 @@ mod rest_api;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let tera = tera::Tera::new("templates/**/*").unwrap();
-    std::env::set_var("RUST_LOG", "actix_web=debug");
+    // std::env::set_var("RUST_LOG", "actix_web=debug");
     dotenv::dotenv().ok();
+    env_logger::init();
 
     // build pool from .env DATABASE_URL
     let db_url = var("FINDUMP_URL").expect("FINDUMP_URL must be set");
@@ -32,6 +33,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(tera.clone()))
             .service(rest_api::index)
             .service(handlers::home)
+            .service(handlers::stock_dashboard)
             .service(Redoc::with_url("/redoc", ApiDoc::openapi()))
             .service(fs::Files::new("/static", "./static").show_files_listing())
             .service(fs::Files::new("/", "./static").index_file("index.html"))
