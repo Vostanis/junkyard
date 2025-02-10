@@ -9,13 +9,14 @@ readme.workspace = true
 [dependencies]
 actix-files = "0.6.6"
 actix-web = "4.9.0"
+bigdecimal = { version = "0.4.7", features = ["serde-json"] }
 chrono = { workspace = true, features = ["serde"] }
 deadpool-postgres.workspace = true
 dotenv.workspace = true
 env_logger = "0.11.6"
 serde.workspace = true
 serde_json.workspace = true
-sqlx = { workspace = true, features = ["chrono"] }
+sqlx = { workspace = true, features = ["bigdecimal", "chrono"] }
 tera = "1.20.0"
 tokio-postgres.workspace = true
 tracing.workspace = true

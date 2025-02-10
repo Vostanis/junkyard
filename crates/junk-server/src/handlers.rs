@@ -1,4 +1,5 @@
 use actix_web::{get, web, HttpResponse, Responder};
+use bigdecimal::BigDecimal;
 use tera::{Context, Tera};
 
 #[derive(sqlx::FromRow, serde::Serialize, serde::Deserialize)]
@@ -38,9 +39,13 @@ pub async fn home(pool: web::Data<sqlx::PgPool>, tera: web::Data<Tera>) -> impl 
 }
 
 #[derive(sqlx::FromRow, serde::Serialize, serde::Deserialize)]
-pub struct Metric {
-    pub end_date: chrono::NaiveDate,
-    pub val: f64,
+pub struct Price {
+    pub date: chrono::NaiveDate,
+    pub perc: Option<f64>,
+    pub adj_close: f64,
+    pub volume: i64,
+    pub volume_7ma: BigDecimal,
+    pub volume_90ma: BigDecimal,
 }
 
 /// Backend for an individual stock's dashboard.
@@ -52,22 +57,23 @@ pub async fn stock_dashboard(
 ) -> impl Responder {
     let symbol = symbol.into_inner();
 
-    match sqlx::query_as::<_, Metric>(
+    match sqlx::query_as::<_, Price>(
         "
-        SELECT end_date, val 
-        FROM stock.metrics_matv 
-        WHERE symbol = $1 AND metric = 'Revenues'
-        ORDER BY end_date DESC
+        SELECT dt::DATE AS date, perc, adj_close, volume, volume_7ma, volume_90ma
+        FROM stock.prices_matv 
+        WHERE symbol = $1
+        ORDER BY date DESC
+        LIMIT 250
     ",
     )
     .bind(&symbol)
     .fetch_all(pool.get_ref())
     .await
     {
-        Ok(revenue) => {
+        Ok(prices) => {
             let mut context = Context::new();
-            context.insert("revenue", &revenue);
-            context.insert("title", "hellooooo");
+            let prices_json = serde_json::to_string(&prices).expect("failed to serialize prices");
+            context.insert("prices", &prices_json);
             let rendered = tera
                 .render("stock_dashboard.html", &context)
                 .expect("failed to render stock_dashboard");
