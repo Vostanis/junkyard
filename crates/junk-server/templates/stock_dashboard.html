@@ -3,51 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Example</title>
+  <title>Stock Dashboard</title>
   <style>
     body {
         font-family: 'JetBrains Mono', monospace;
         display: flex;
         justify-content: center;
-        align-items: flex-start;
-        height: 100vh;
-        margin: 0;
+        align-items: center;
         flex-direction: column;
-        position: relative;
+        /* height: 100vh; */
+        margin: 0;
+        padding: 20px 0;
     }
 		.header-container {
-			position: absolute;
-			top: 0%;
-			left: 50%;
-			transform: translateX(-50%);
 			text-align: center;
 			width: 100%;
+      margin-bottom: 20px;
 		}
+
+    .chart-container {
+      width: 80%;
+      /* max-width: 800px; */
+      /* margin: 20px auto; */
+    }
     canvas {
-      max-width: 100%;
-      height: auto;
-      width: 800px;
-      height: 800px;
+      width: 100% !important;
+      height: 400px !important;
     }
     </style>
 </head>
 <body>
     <div class="header-container">
       <h1>Stock Dashboard</h1>
+    </div>
+
+    <!-- price chart -->
+    <div class="chart-container">
       <canvas id="priceChart"></canvas>
+    </div>
+
+    <!-- volume chart -->
+    <div class="chart-container">
+      <canvas id="volumeChart"></canvas>
     </div>
           
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
       const prices_json = '{{ prices | safe }}';
       const prices = JSON.parse(prices_json);
+      prices.sort((a, b) => new Date(b.date) - new Date(a.date));
 
       // Prepare data for Chart.js
-      const labels = prices.map(item => item.date);
-      const adjCloseData = prices.map(item => item.adj_close);
-      const volumeData = prices.map(item => item.volume);
-      const ctx = document.getElementById('priceChart').getContext('2d');
-        const myChart = new Chart(ctx, {
+      const labels = prices.map(item => item.date).reverse();
+      const adjCloseData = prices.map(item => item.adj_close).reverse();
+      const volumeData = prices.map(item => item.volume).reverse();
+      const volume7MAData = prices.map(item => item.volume_7ma).reverse();
+      const volume90MAData = prices.map(item => item.volume_90ma).reverse();
+
+       // Price Chart
+        const priceCtx = document.getElementById('priceChart').getContext('2d');
+        new Chart(priceCtx, {
             type: 'line',
             data: {
                 labels: labels,
@@ -58,20 +73,14 @@
                         borderColor: 'blue',
                         borderWidth: 1,
                         fill: false,
-                        yAxisID: 'y' // Use primary y-axis
-                    },
-                    {
-                        label: 'Volume',
-                        data: volumeData,
-                        borderColor: 'red',
-                        borderWidth: 1,
-                        fill: false,
-                        yAxisID: 'y-axis-volume' // Use secondary y-axis
+                        pointRadius: 1, // Smaller markers
+                        yAxisID: 'y'
                     }
                 ]
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 scales: {
                     x: {
                         display: true,
@@ -86,28 +95,83 @@
                             display: true,
                             text: 'Adjusted Close Price'
                         }
-                    },
-                    'y-axis-volume': {
-                        type: 'linear',
-                        display:true,
-                        position:'right',
-                        title:{
-                            display:true,text:'Volume'
-                        },
-                        grid: {
-                          drawOnChartArea:false
-                        }
-                      }
-                    },
-                    plugins: {
-                      title: {
+                    }
+                },
+                plugins: {
+                    title: {
                         display: true,
                         text: 'Price Chart'
-                      }
                     }
-                  }
                 }
-              );
+            }
+        });
+
+        // Volume Chart
+        const volumeCtx = document.getElementById('volumeChart').getContext('2d');
+        new Chart(volumeCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Volume',
+                        data: volumeData,
+                        borderColor: 'red',
+                        borderWidth: 1,
+                        fill: false,
+                        pointRadius: 1, // Smaller markers
+                        yAxisID: 'y-axis-volume'
+                    },
+                    {
+                        label: 'Volume 7MA',
+                        data: volume7MAData,
+                        borderColor: 'green',
+                        borderWidth: 1,
+                        fill: false,
+                        pointRadius: 0, // Smaller markers
+                        yAxisID: 'y-axis-volume',
+                        borderDash: [5, 5] // Dashed line for MA
+                    },
+                    {
+                        label: 'Volume 90MA',
+                        data: volume90MAData,
+                        borderColor: 'purple',
+                        borderWidth: 1,
+                        fill: false,
+                        pointRadius: 0, // Smaller markers
+                        yAxisID: 'y-axis-volume',
+                        borderDash: [5, 5] // Dashed line for MA
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        // type: 'time',
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Volume'
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Volume Chart'
+                    }
+                }
+            }
+        });
     </script>
 </body>
 </html>
