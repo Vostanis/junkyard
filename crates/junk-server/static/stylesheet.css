@@ -118,3 +118,27 @@ li strong {
 li weak {
     color: var(--text-muted);
 }
+
+button {
+    font-family: 'JetBrains Mono', monospace;
+    padding: 10px 20px;
+    background: var(--accent-blue);
+    border: none;
+    color: var(--background);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: var(--highlight-bg);
+}
+
+button:focus {
+    outline: none;
+    box-shadow: 0 0 5px var(--accent-blue);
+}
+
+button:active {
+    background-color: var(--accent-magenta);
+}
