@@ -1,0 +1,120 @@
+/* Theme-bear inspired variables */
+:root {
+    --background: #1f2023;           /* editor.background */
+    --foreground: #bcb28d;           /* foreground */
+    --divider-color: #2f3033;        /* editorIndentGuide.background - subtle divider */
+    --accent-blue: #58b2dc;          /* terminal.ansiBlue */
+    --accent-magenta: #e03c8a;       /* terminal.ansiRed */
+    --accent-orange: #e6844f;        /* terminal.ansiYellow */
+    --highlight-bg: #2c5a65;         /* editor.selectionBackground */
+    --hover-bg: #282b31;             /* editor.lineHighlightBackground */
+    --text-muted: #707c74;           /* comment */
+    --graph-bg: #212121;             /* tab.inactiveBackground */
+}
+
+body {
+    font-family: 'JetBrains Mono', monospace;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    height: 100vh;
+    margin: 0;
+    flex-direction: column;
+    position: relative;
+    background: var(--background);
+    color: var(--foreground);
+}
+
+/* Header container */
+.header-container {
+    position: absolute;
+    top: 15%;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    width: 100%;
+}
+
+h1 {
+    color: var(--foreground);
+    font-size: 2.5em;
+    margin-bottom: 20px;
+}
+
+/* Search form */
+form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+input {
+    font-family: 'JetBrains Mono', monospace;
+    width: 800px;
+    padding: 10px;
+    background: var(--hover-bg);
+    border: 1px solid var(--divider-color);
+    color: var(--foreground);
+    border-radius: 4px;
+    outline: none;
+}
+
+input:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 5px var(--accent-blue);
+}
+
+small {
+    color: var(--text-muted);
+    font-size: 0.8em;
+    margin-top: 5px;
+}
+
+/* List styles */
+ul {
+    width: 800px;
+    list-style: none;
+    text-align: center;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    position: absolute;
+    top: 32%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+li {
+    padding: 8px 0;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+li.label {
+    color: var(--label-color);
+    text-transform: uppercase;
+    font-size: 0.8em;
+    letter-spacing: 0.0125em;
+    margin: 1rem 0 0.25rem 0;
+}
+
+li:not(.label) {
+    color: var(--foreground);
+}
+
+li:not(.label):hover {
+    background-color: var(--hover-bg);
+}
+
+li.highlighted {
+    background-color: var(--highlight-bg);
+    color: var(--foreground);
+}
+
+li strong {
+    color: var(--accent-magenta);
+}
+
+li weak {
+    color: var(--text-muted);
+}

@@ -60,10 +60,10 @@ pub async fn stock_dashboard(
     match sqlx::query_as::<_, Price>(
         "
         SELECT dt::DATE AS date, perc, adj_close, volume, volume_7ma, volume_90ma
-        FROM stock.prices_matv 
+        FROM stock.prices_matv  
         WHERE symbol = $1
         ORDER BY date DESC
-        LIMIT 250
+        -- LIMIT 250
     ",
     )
     .bind(&symbol)

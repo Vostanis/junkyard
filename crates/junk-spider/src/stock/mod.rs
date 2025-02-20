@@ -8,7 +8,6 @@ pub mod common;
 /// [SEC]: https://www.sec.gov/search-filings/edgar-application-programming-interfaces
 pub mod sec_bulks;
 pub mod sec_metrics;
-pub mod sec_metrics_transform;
 pub mod sec_tickers;
 
 /// Price data collected from the Yahoo Finance API; inspiration from Python's [yfinance] library.

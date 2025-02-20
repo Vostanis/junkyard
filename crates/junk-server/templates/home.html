@@ -4,86 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>assetlib</title>
-    <style>
-        body {
-	    	font-family: 'JetBrains Mono', monospace;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            height: 100vh;
-            margin: 0;
-            flex-direction: column;
-			position: relative;
-        }
-		.header-container {
-			position: absolute;
-			top: 15%;
-			left: 50%;
-			transform: translateX(-50%);
-			text-align: center;
-			width: 100%;
-		}
-        form {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        input {
-	    	font-family: 'JetBrains Mono', monospace;
-            width: 400px;
-			padding: 10px;
-        }
-        button {
-            margin-top: 5px;
-        }
-		ul {
-			width: 400px;
-			list-style: none;
-			text-align: center;
-			margin: 0;
-			padding: 0;
-			overflow-y: auto;
-			width: 100%;
-			position: absolute;
-			top: 32%;
-			left: 50%;
-			transform: translateX(-50%);
-		}
-		li {
-			color: #000;
-			strong { color: #000; }
-			weak { color: #767676; }
-			/* padding: 5px 0; */
-			+ .label { margin-top: 1rem; }
-			&.label {
-				color: #CCC;
-				text-transform: uppercase;
-				font-size: 0.8em;
-				letter-spacing: 0.0125em;
-				margin-bottom: 0.25rem;
-			}
-			cursor: pointer;
-		}
-        li:hover {
-            background-color: #f0f0f0
-		}
-		li:not(.label):hover {
-    		background-color: #F0BD1D;
-		}
-		small {
-			font-size: 0.8em;
-			display: block;
-		}
-    </style>
+	<link rel="stylesheet" href="/static/stylesheet.css">
 </head>
 <body>
 	<div class="header-container">
-		<!-- <img src="static/chimera.jpeg" alt="Chimera Photo" style="max-width: 50%; height: auto;"> -->
 		<h1>assetlib</h1>
 		<form id="searchForm" method="get">
 			<input type="text" id="symbolInput" placeholder="Search assets (e.g., AAPL, BTCUSDT)" required autocomplete="off">
 			<small style="color: #767676; margin-top: 5px;">Press "/" to focus search</small>
-			<!-- <button type="submit">Search</button> -->
 		</form>
 	</div>
 	<ul id="list"></ul>
@@ -151,7 +79,7 @@
 			results.slice(0, 30).forEach((result) => {
 				const el = document.createElement('li');
 				el.innerHTML = `
-					<strong>[${result.item.symbol}]</strong> ${result.item.title} <weak>(${result.item.industry})</weak>
+					<strong>[${result.item.symbol}]</strong> ${result.item.title} <weak>${result.item.industry}</weak>
 				`;
 	
 				el.dataset.url = `/asset/${result.item.symbol}`; // Set URL in data attribute
@@ -199,13 +127,9 @@
 	
 		function updateHighlight(items) {
 			items.forEach((item, index) => {
+				item.classList.toggle('highlighted', index === currentIndex);
 				if (index === currentIndex) {
-					item.style.backgroundColor = "#F0BD1D"; // Highlight color
-					item.style.color = "#000";
-					item.scrollIntoView({ block: "nearest" }); // Ensure highlighted item is visible
-				} else {
-					item.style.backgroundColor = ""; // Reset background color
-					item.style.color = "";
+					item.scrollIntoView({ block: "nearest" });
 				}
 			});
 		}

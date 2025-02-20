@@ -1,14 +1,47 @@
+--------------------------------------------------------------------------
+--
+-- RELATION TO THE DATABASE
+-- ========================
+--
+-- `stock.metrics` contains raw data from SEC company filings; this, comes
+-- with the following issue:
+--
+-- 		> Quarterly reports are typically filed 3 times a year;
+-- 		> An Annual report is then the fourth report;
+-- 		> this implies there is at least 1 missing Quarterly entry for 
+--		  metrics such as Revenue, or Earnings, etc.
+--
+-- Due to this issue, we must infer the missing entries, but there are
+-- further data cleansing caveats:
+--
+-- 		1. Filing dates can be whenever (we just assume month 1-3 is Q1,
+--		   4-6 is Q2, etc.);
+--		2. Each metric can be filed with different behaviour;
+--		3. Each metric can change naming convention whenever, e.g.,
+--		   	Revenue has been one of:
+--		   		> Revenues
+--		   		> SalesRevenueNet
+--		   		> RevenueFromContractWithCustomerExcludingAssessedTax
+--		4. If a metric is reported in, for example, Q1, it may be referred to again in
+--		   subsequent reports (typically used for comparison in a year's time).
+--
+--------------------------------------------------------------------------
+
 -- DELETE FROM stock.metrics
 -- WHERE form = 'Inferred';
 
 WITH
+debug(active, metric_pk) AS (
+	VALUES(false, 9)
+)
+
 -- gather all the annual metrics and give an ID
 annual_cte AS (
 	SELECT DISTINCT
 		ROW_NUMBER() OVER () AS id_a,
 		symbol_pk,
 		metric_pk,
-		acc_pk,
+		acc_pk, 
 		start_date,
 		end_date,
 		DATERANGE(start_date, end_date) AS date_range,
@@ -27,7 +60,7 @@ annual_cte AS (
 		end_date
 ),
 
--- match all the quarterly metrics to an annual 1
+-- match all the quarterly entries to the date range an annual entry
 quarterly_cte AS (
 	SELECT DISTINCT
 		id_a,
@@ -61,7 +94,7 @@ quarterly_cte AS (
 		WHERE
 				form = '10-Q'
 			AND start_date IS NOT NULL
-			AND (end_date - start_date) <= 100 --  period length <= 100 days
+			AND (end_date - start_date) <= 100 -- period length <= 100 days
 		GROUP BY
 			symbol_pk,
 			metric_pk,
@@ -74,7 +107,7 @@ quarterly_cte AS (
 		AND qs.symbol_pk = anns.symbol_pk
 ),
 
--- order the annual values alongside 3 matching quarterly values
+-- order the annual values alongside 4 matching quarterly values
 ordered_cte AS (
 	SELECT
 		ann.symbol_pk,
@@ -107,7 +140,7 @@ ordered_cte AS (
 		ann.date_range
 )
 
--- collect only inferred values; to be INSERT'd in to the original stock.metrics table
+-- collect only inferred values; to be INSERTed in to the original stock.metrics table
 INSERT INTO stock.metrics (
 	symbol_pk,
 	metric_pk,
@@ -126,7 +159,7 @@ SELECT
 	o.symbol_pk,
 	o.metric_pk,
 	o.acc_pk,
-	
+
 	-- infer "start_date"
 	CASE
 		-- q1
@@ -158,7 +191,7 @@ SELECT
 		) THEN MAKE_DATE(EXTRACT(YEAR FROM q1_start_date)::INT, 10, 1)
 		ELSE '1970-01-01' 
 	END AS start_date,
-	
+
 	-- infer "end_date"	
 	CASE
 		-- q1
@@ -190,7 +223,7 @@ SELECT
 		) THEN MAKE_DATE(EXTRACT(YEAR FROM q1_end_date)::INT, 12, 31)
 		ELSE '1970-01-01'
 	END AS end_date,
-	
+
 	'1970-01-01' AS filing_date,
 	EXTRACT(YEAR FROM q1_end_date)::INT AS year,
 	'I' AS period,

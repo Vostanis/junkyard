@@ -60,9 +60,9 @@ pub(crate) async fn run(endpoints: Vec<Endpoint>, tui: bool) -> anyhow::Result<(
                 let time = std::time::Instant::now();
 
                 // stock::sec_bulks::scrape(tui).await?;
-                // stock::sec_tickers::scrape(&pool, tui).await?;
-                // stock::yahoo_finance::scrape(&pool, tui).await?;
-                stock::sec_metrics::scrape(&pool, tui).await?;
+                stock::sec_tickers::scrape(&pool, tui).await?;
+                stock::yahoo_finance::scrape(&pool, tui).await?;
+                // stock::sec_metrics::scrape(&pool, tui).await?;
 
                 info!("stock data collected, time elapsed: {:?}", time.elapsed());
             }

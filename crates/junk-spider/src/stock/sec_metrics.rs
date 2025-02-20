@@ -16,7 +16,7 @@ use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
 use tracing::{debug, error, info, trace};
 
-/// The process for copying SEC metric.json files from the /buffer/ directory into the database.
+/// The process for copying SEC metric.json files from the "buffer/" directory into the database.
 struct Process {
     tickers: Vec<Ticker>,
     metrics: Arc<Mutex<KeyTracker<i32, String>>>,

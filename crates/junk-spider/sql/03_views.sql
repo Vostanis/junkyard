@@ -3,14 +3,15 @@
 -- RELATION TO THE DATABASE
 -- ========================
 --
--- MATERIALIZED VIEWs are used as the entrypoint for publicised data;
--- 1. they are precomputed, and so are fast to query;
--- 2. a layer of transformation between the raw input and the output is
---    cleaner for debugging;
--- 3. and they can be refreshed on a schedule, or on-demand.
+-- MATERIALIZED VIEWs are used as the entrypoint for publicised data, 
+-- since:
+-- 		1. they are precomputed, and so are fast to query;
+-- 		2. a layer of transformation between the raw input and the output 
+--		   is cleaner for debugging;
+-- 		3. and they can be refreshed on a schedule, or on-demand.
 --
--- Therefore, when users query data (via an app or API), they're querying
--- from one of the following views.
+-- Therefore, when users query data (via an app or API) they're querying
+-- from one of the VIEWs built with this script.
 --
 --------------------------------------------------------------------------
 
@@ -19,27 +20,34 @@
 -- =====================================================================
 
 -- Stock Metrics
-CREATE MATERIALIZED VIEW IF NOT EXISTS stock.metrics_matv AS
+DROP MATERIALIZED VIEW stock.metrics_matv;
+CREATE MATERIALIZED VIEW stock.metrics_matv AS (
 SELECT
-	sy.symbol,
-	sy.title,
+	s.symbol,
+	s.title,
+	l.metric,
 	m.start_date,
 	m.end_date,
-	m.year,
-	m.period,
-	m.form,
-	m.frame,
-	mlib.metric,
 	m.val,
-	acc.accounting
-FROM stock.symbols AS sy
-INNER JOIN stock.metrics AS m
-	ON sy.pk = m.symbol_pk
-INNER JOIN stock.metrics_lib AS mlib
-	ON mlib.pk = m.metric_pk
-INNER JOIN stock.acc_stds AS acc
-	ON acc.pk = m.acc_pk
-;
+	ARRAY_AGG(DISTINCT m.form) AS forms,
+	ARRAY_AGG(DISTINCT m.accn) AS accns
+	
+FROM stock.metrics m
+INNER JOIN stock.symbols s ON m.symbol_pk = s.pk
+INNER JOIN stock.metrics_lib l ON m.metric_pk = l.pk
+
+WHERE 
+	((m.end_date - m.start_date) <= 120) OR (start_date IS NULL AND m.frame LIKE '%I')
+GROUP BY 
+	s.symbol,
+	s.title,
+	l.metric,
+	m.start_date,
+	m.end_date,
+	m.val
+ORDER BY 
+	m.start_date DESC
+);
 
 -- Stock Prices
 CREATE MATERIALIZED VIEW IF NOT EXISTS stock.prices_matv AS
@@ -128,6 +136,8 @@ LEFT JOIN percentage_change_cte AS pc
 	AND pr.interval_pk = pc.interval_pk
 	AND pr.dt = pc.dt
 ;
+
+--------------------------------------------------------------------------
 
 -- =====================================================================
 -- CRYPTO

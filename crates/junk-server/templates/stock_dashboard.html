@@ -3,175 +3,499 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stock Dashboard</title>
-  <style>
-    body {
-        font-family: 'JetBrains Mono', monospace;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        flex-direction: column;
-        /* height: 100vh; */
-        margin: 0;
-        padding: 20px 0;
-    }
-		.header-container {
-			text-align: center;
-			width: 100%;
-      margin-bottom: 20px;
-		}
-
-    .chart-container {
-      width: 80%;
-      /* max-width: 800px; */
-      /* margin: 20px auto; */
-    }
-    canvas {
-      width: 100% !important;
-      height: 400px !important;
-    }
+    <link rel="stylesheet" href="/static/stylesheet.css">
+    <title>Stock Dashboard</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            min-height: 100vh;
+            overflow: hidden; /* Prevent scrolling */
+        }
+        .chart-container {
+            width: 100%;
+            height: 100vh; /* Full viewport height */
+            padding: 0 20px;
+            box-sizing: border-box;
+            position: relative; /* For absolute positioning of charts */
+        }
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            position: absolute;
+            top: 0;
+            left: 0;
+            /* transition: opacity 0.3s ease; Smooth transition for visibility */
+        }
+        .hidden {
+            opacity: 0; /* Fade out instead of display: none for smoother transitions */
+            pointer-events: none; /* Disable interactions with hidden charts */
+        }
+        .active {
+            opacity: 1; /* Fully visible */
+            z-index: 1; /* Ensure active chart is on top */
+        }
     </style>
 </head>
 <body>
-    <div class="header-container">
-      <h1>Stock Dashboard</h1>
+    <div class="chart-container" id="chartContainer">
+        <!-- Price + Volume Chart -->
+        <canvas id="priceVolumeChart" class="active"></canvas>
+
+        <!-- Volume Only Chart -->
+        <canvas id="volumeChart" class="hidden"></canvas>
+
+        <!-- Price Only Chart -->
+        <canvas id="priceChart" class="hidden"></canvas>
     </div>
 
-    <!-- price chart -->
-    <div class="chart-container">
-      <canvas id="priceChart"></canvas>
-    </div>
+    <button id="toggleLogScale">Toggle Log Scale</button>
 
-    <!-- volume chart -->
-    <div class="chart-container">
-      <canvas id="volumeChart"></canvas>
-    </div>
-          
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
     <script>
-      const prices_json = '{{ prices | safe }}';
-      const prices = JSON.parse(prices_json);
-      prices.sort((a, b) => new Date(b.date) - new Date(a.date));
+        // Debugging logs
+        console.log('Chart.js loaded:', typeof Chart !== 'undefined');
 
-      // Prepare data for Chart.js
-      const labels = prices.map(item => item.date).reverse();
-      const adjCloseData = prices.map(item => item.adj_close).reverse();
-      const volumeData = prices.map(item => item.volume).reverse();
-      const volume7MAData = prices.map(item => item.volume_7ma).reverse();
-      const volume90MAData = prices.map(item => item.volume_90ma).reverse();
+        // Parse the prices data
+        let prices;
+        try {
+            const prices_json = '{{ prices | safe }}';
+            prices = JSON.parse(prices_json);
+            console.log('Raw prices data:', prices_json);
+            console.log('Parsed prices:', prices);
+        } catch (e) {
+            console.error('Error parsing prices:', e);
+            // Fallback data (matching your screenshot's range)
+            prices = [
+                { date: '2020-01-02', adj_close: 140.20, volume: 350000000, volume_7ma: 320000000, volume_90ma: 300000000 },
+                { date: '2020-01-03', adj_close: 145.60, volume: 280000000, volume_7ma: 310000000, volume_90ma: 290000000 },
+                { date: '2020-01-06', adj_close: 148.20, volume: 300000000, volume_7ma: 300000000, volume_90ma: 280000000 },
+                { date: '2020-01-07', adj_close: 147.80, volume: 250000000, volume_7ma: 290000000, volume_90ma: 270000000 },
+                // Add more data points as needed to match your full range (2020–2025)
+                { date: '2025-02-01', adj_close: 280.00, volume: 150000000, volume_7ma: 200000000, volume_90ma: 220000000 }
+            ];
+            console.log('Using fallback data:', prices);
+        }
 
-       // Price Chart
-        const priceCtx = document.getElementById('priceChart').getContext('2d');
-        new Chart(priceCtx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Adjusted Close Price',
-                        data: adjCloseData,
-                        borderColor: 'blue',
-                        borderWidth: 1,
-                        fill: false,
-                        pointRadius: 1, // Smaller markers
-                        yAxisID: 'y'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        display: true,
-                        title: {
-                            display: true,
-                            text: 'Date'
+        // Sort and prepare data
+        prices.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const labels = prices.map(item => item.date).reverse();
+        const priceData = prices.map(item => item.adj_close).reverse();
+        const volumeData = prices.map(item => item.volume || 0).reverse();
+        const volume7MAData = prices.map(item => item.volume_7ma || 0).reverse();
+        const volume90MAData = prices.map(item => item.volume_90ma || 0).reverse();
+
+        console.log('Labels:', labels);
+        console.log('Price data:', priceData);
+        console.log('Volume data:', volumeData);
+
+        // Theme variables (matching your screenshot's dark theme)
+        const theme = {
+            background: getComputedStyle(document.documentElement).getPropertyValue('--background').trim() || '#1f2023',
+            foreground: getComputedStyle(document.documentElement).getPropertyValue('--foreground').trim() || '#bcb28d',
+            accentBlue: getComputedStyle(document.documentElement).getPropertyValue('--accent-blue').trim() || '#58b2dc',
+            accentMagenta: getComputedStyle(document.documentElement).getPropertyValue('--accent-magenta').trim() || '#e03c8a',
+            textMuted: getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#707c74',
+            graphBg: getComputedStyle(document.documentElement).getPropertyValue('--graph-bg').trim() || '#212121'
+        };
+
+        // Charts array to manage multiple charts
+        const charts = [];
+
+        // Price + Volume Chart (matching your screenshot)
+        const priceVolumeCtx = document.getElementById('priceVolumeChart').getContext('2d');
+        if (!priceVolumeCtx) {
+            console.error('Price + Volume chart context not found!');
+        } else {
+            const priceVolumeChart = new Chart(priceVolumeCtx, {
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: 'Adjusted Close Price',
+                            data: priceData,
+                            borderColor: theme.foreground,
+                            borderWidth: 1,
+                            fill: false,
+                            pointRadius: 0, // No points for cleaner look
+                            yAxisID: 'y-price'
+                        },
+                        {
+                            type: 'bar',
+                            label: 'Volume',
+                            data: volumeData,
+                            backgroundColor: theme.accentMagenta + '80', // Semi-transparent magenta
+                            borderColor: theme.accentMagenta,
+                            borderWidth: 1,
+                            yAxisID: 'y-volume',
+                            barPercentage: 0.7,
+                            categoryPercentage: 0.8
+                        },
+                         {
+                            type: 'line',
+                            label: 'Volume 7MA',
+                            data: volume7MAData,
+                            borderColor: theme.textMuted, //muted color
+                            borderWidth: 1,  // Very thin line
+                            fill: false,
+                            pointRadius: 0,
+                            yAxisID: 'y-volume'
+                        },
+                        {
+                            type: 'line',
+                            label: 'Volume 90MA',
+                            data: volume90MAData,
+                            borderColor: theme.foreground, //more visible color
+                            borderWidth: 1,  // Very thin line
+                            fill: false,
+                            pointRadius: 0,
+                            yAxisID: 'y-volume'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: {
+                        padding: {
+                            top: 20,
+                            bottom: 20,
+                            left: 20,
+                            right: 20
                         }
                     },
-                    y: {
-                        display: true,
+                    scales: {
+                        x: {
+                            type: 'category',
+                            title: {
+                                display: true,
+                                text: 'Date',
+                                color: theme.foreground
+                            },
+                            ticks: {
+                                color: theme.textMuted,
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            },
+                            grid: {
+                                display: true,
+                                color: theme.textMuted + '33', // Visible grid lines with 20% opacity
+                                drawBorder: true
+                            }
+                        },
+                        'y-price': {
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Price',
+                                color: theme.foreground
+                            },
+                            ticks: {
+                                color: theme.textMuted
+                            },
+                            beginAtZero: false,
+                            suggestedMin: Math.min(...priceData) * 0.9,
+                            suggestedMax: Math.max(...priceData) * 1.1,
+                            grid: {
+                                display: true,
+                                color: theme.textMuted + '33', // Visible grid lines with 20% opacity
+                                drawBorder: true
+                            },
+                            type: 'linear',  // default, but making it explicit
+                            stack: 'price',
+                            stackWeight: 1
+                        },
+                        'y-volume': {
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Volume',
+                                color: theme.foreground
+                            },
+                            ticks: {
+                                color: theme.textMuted
+                            },
+                            grid: {
+                                display: false
+                            },
+                            beginAtZero: true,
+                            max: Math.max(...volumeData) * 5,  // Limit volume bar height to 1/5
+                            stack: 'volume',
+                            stackWeight: 5
+                        }
+                    },
+                    plugins: {
                         title: {
                             display: true,
-                            text: 'Adjusted Close Price'
+                            text: 'Price + Volume Chart',
+                            color: theme.foreground
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    const datasetLabel = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    return `${datasetLabel}: ${value.toLocaleString()}`; // Format with commas
+                                }
+                            },
+                            backgroundColor: theme.graphBg, // Dark background for tooltip
+                            bodyColor: theme.foreground,
+                            titleColor: theme.foreground
+                        },
+                        legend: {
+                            labels: {
+                                color: theme.foreground
+                            }
+                        }
+                    },
+                    elements: {
+                        line: {
+                            tension: 0.1 // Slight curve for smoother line
                         }
                     }
-                },
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Price Chart'
-                    }
                 }
-            }
-        });
+            });
+            charts.push(priceVolumeChart);  // Add to charts array
+        }
 
-        // Volume Chart
+        // Volume Only Chart
         const volumeCtx = document.getElementById('volumeChart').getContext('2d');
-        new Chart(volumeCtx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Volume',
-                        data: volumeData,
-                        borderColor: 'red',
-                        borderWidth: 1,
-                        fill: false,
-                        pointRadius: 1, // Smaller markers
-                        yAxisID: 'y-axis-volume'
-                    },
-                    {
-                        label: 'Volume 7MA',
-                        data: volume7MAData,
-                        borderColor: 'green',
-                        borderWidth: 1,
-                        fill: false,
-                        pointRadius: 0, // Smaller markers
-                        yAxisID: 'y-axis-volume',
-                        borderDash: [5, 5] // Dashed line for MA
-                    },
-                    {
-                        label: 'Volume 90MA',
-                        data: volume90MAData,
-                        borderColor: 'purple',
-                        borderWidth: 1,
-                        fill: false,
-                        pointRadius: 0, // Smaller markers
-                        yAxisID: 'y-axis-volume',
-                        borderDash: [5, 5] // Dashed line for MA
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        // type: 'time',
-                        display: true,
-                        title: {
-                            display: true,
-                            text: 'Date'
+        if (!volumeCtx) {
+            console.error('Volume chart context not found!');
+        } else {
+            charts.push(new Chart(volumeCtx, {
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Volume',
+                            data: volumeData,
+                            backgroundColor: theme.accentMagenta + '80',
+                            borderColor: theme.accentMagenta,
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                         {
+                            type: 'line',
+                            label: 'Volume 7MA',
+                            data: volume7MAData,
+                            borderColor: theme.textMuted, //muted color
+                            borderWidth: 2,  // Very thin line
+                            fill: false,
+                            pointRadius: 0,
+                            yAxisID: 'y'
+                        },
+                        {
+                            type: 'line',
+                            label: 'Volume 90MA',
+                            data: volume90MAData,
+                            borderColor: theme.accentBlue, //more visible color
+                            borderWidth: 2,  // Very thin line
+                            fill: false,
+                            pointRadius: 0,
+                            yAxisID: 'y'
                         }
-                    },
-                    y: {
-                        display: true,
-                        title: {
-                            display: true,
-                            text: 'Volume'
-                        }
-                    }
+                    ]
                 },
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Volume Chart'
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'category',
+                            title: {
+                                display: true,
+                                text: 'Date',
+                                color: theme.foreground
+                            },
+                            ticks: {
+                                color: theme.textMuted,
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            },
+                            grid: {
+                                color: theme.graphBg + '33'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Volume',
+                                color: theme.foreground
+                            },
+                            ticks: {
+                                color: theme.textMuted
+                            },
+                            beginAtZero: true,
+                            max: Math.max(...volumeData) * 5, // Limit volume bar height
+                            grid: {
+                                color: theme.graphBg + '33'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Volume Chart',
+                            color: theme.foreground
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    const datasetLabel = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    return `${datasetLabel}: ${value.toLocaleString()}`;
+                                }
+                            },
+                            backgroundColor: theme.graphBg,
+                            bodyColor: theme.foreground,
+                            titleColor: theme.foreground
+                        },
+                        legend: {
+                            labels: {
+                                color: theme.foreground
+                            }
+                        }
                     }
                 }
-            }
-        });
+            }));
+        }
+
+        // Price Only Chart
+        const priceCtx = document.getElementById('priceChart').getContext('2d');
+        if (!priceCtx) {
+            console.error('Price chart context not found!');
+        } else {
+            charts.push(new Chart(priceCtx, {
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: 'Adjusted Close Price',
+                            data: priceData,
+                            borderColor: theme.accentBlue,
+                            borderWidth: 2,
+                            fill: false,
+                            pointRadius: 0,
+                            yAxisID: 'y'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'category',
+                            title: {
+                                display: true,
+                                text: 'Date',
+                                color: theme.foreground
+                            },
+                            ticks: {
+                                color: theme.textMuted,
+                                maxRotation: 45,
+                                minRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            },
+                            grid: {
+                                color: theme.graphBg + '33'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Price',
+                                color: theme.foreground
+                            },
+                            ticks: {
+                                color: theme.textMuted
+                            },
+                            beginAtZero: false,
+                            suggestedMin: Math.min(...priceData) * 0.9,
+                            suggestedMax: Math.max(...priceData) * 1.1,
+                            grid: {
+                                color: theme.graphBg + '33'
+                            },
+                            type: 'linear' //Explicitly set to linear
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Price Chart',
+                            color: theme.foreground
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    const datasetLabel = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    return `${datasetLabel}: ${value.toLocaleString()}`;
+                                }
+                            },
+                            backgroundColor: theme.graphBg,
+                            bodyColor: theme.foreground,
+                            titleColor: theme.foreground
+                        },
+                        legend: {
+                            labels: {
+                                color: theme.foreground
+                            }
+                        }
+                    }
+                }
+            }));
+        }
+
+        // Function to toggle log scale
+        function toggleLogScale() {
+            charts.forEach(chart => {
+                const yAxis = chart.options.scales['y-price'] || chart.options.scales['y']; //Target Price Axis.
+                const currentType = yAxis.type || 'linear';
+                yAxis.type = currentType === 'linear' ? 'logarithmic' : 'linear'; //Toggle
+                yAxis.ticks.callback = currentType === 'linear' ? logScaleTickFormat : linearScaleTickFormat;
+
+                chart.update(); //Update the chart
+            });
+        }
+
+        function logScaleTickFormat(value, index, ticks) {
+            if (value === 0) return 0;
+            const roundedValue = Math.pow(10, value).toFixed(2); //Adjust decimal places
+
+            return roundedValue;
+        }
+
+        function linearScaleTickFormat(value, index, ticks) {
+            return value.toLocaleString();  // Your existing formatting
+        }
+        // Event listener for toggle button
+        document.getElementById('toggleLogScale').addEventListener('click', toggleLogScale);
+
     </script>
 </body>
 </html>
+''
