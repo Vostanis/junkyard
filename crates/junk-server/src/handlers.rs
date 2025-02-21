@@ -16,8 +16,8 @@ struct Ticker {
 #[get("/home")]
 pub async fn home(pool: web::Data<sqlx::PgPool>, tera: web::Data<Tera>) -> impl Responder {
     match sqlx::query_as::<_, Ticker>(r#"
-    SELECT 
-        pk, 
+    SELECT
+        pk,
         symbol, 
         REGEXP_REPLACE(title, '[''\\\/]', '', 'g') AS title, 
         REGEXP_REPLACE(industry, '[''\\\/]', '', 'g') AS industry
@@ -43,6 +43,9 @@ pub struct Price {
     pub date: chrono::NaiveDate,
     pub perc: Option<f64>,
     pub adj_close: f64,
+    pub adj_close_20ma: f64,
+    pub adj_close_50ma: f64,
+    pub adj_close_200ma: f64,
     pub volume: i64,
     pub volume_7ma: BigDecimal,
     pub volume_90ma: BigDecimal,
@@ -59,7 +62,7 @@ pub async fn stock_dashboard(
 
     match sqlx::query_as::<_, Price>(
         "
-        SELECT dt::DATE AS date, perc, adj_close, volume, volume_7ma, volume_90ma
+        SELECT dt::DATE AS date, perc, adj_close, adj_close_20ma, adj_close_50ma, adj_close_200ma, volume, volume_7ma, volume_90ma
         FROM stock.prices_matv  
         WHERE symbol = $1
         ORDER BY date DESC

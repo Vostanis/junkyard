@@ -26,9 +26,8 @@
             display: flex;
             justify-content: center;
         }
-
         #searchInput {
-            width: 50%; /* Adjust width as needed */
+            width: 50%;
             padding: 8px 12px;
             background: var(--graph-bg);
             color: var(--foreground);
@@ -38,11 +37,9 @@
             font-size: 14px;
             transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
-
         #searchInput::placeholder {
             color: var(--text-muted);
         }
-
         #searchInput:focus {
             outline: none;
             border-color: var(--accent-blue);
@@ -83,13 +80,19 @@
         }
         .chart-container {
             width: 100%;
-            height: calc(100vh - 70px); /* Adjusted from 50px to 70px for search bar (~20px) + tab bar (~50px) */
+            height: calc(100vh - 70px); /* Adjusted for search bar (~20px) + tab bar (~50px) */
             padding: 0 20px;
             box-sizing: border-box;
             position: relative;
             display: flex;
-            align-items: center;
+            flex-direction: column;
+            align-items: stretch;
             justify-content: space-between;
+        }
+        .chart-wrapper {
+            position: relative;
+            flex-grow: 1;
+            height: 100%;
         }
         canvas {
             width: 100% !important;
@@ -107,15 +110,34 @@
             opacity: 1;
             z-index: 1;
         }
-        .log-button-container {
-            position: absolute;
-            bottom: 20px;
-            right: 40px; /* Adjusted to not overlap with arrow button */
-            z-index: 2; /* Above chart */
-            visibility: hidden; /* Reserve space, just hide visually */
+        .controls-bar {
+            background: var(--background);
+            padding: 10px;
+            border-top: 1px solid var(--text-muted);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            visibility: hidden; /* Hidden by default, shown only for Price + Volume */
+            z-index: 2;
         }
-        .log-button-container.active {
-            visibility: visible; /* Show when active */
+        .controls-bar.active {
+            visibility: visible;
+        }
+        #dateRange {
+            padding: 8px 12px;
+            background: var(--graph-bg);
+            color: var(--foreground);
+            border: 1px solid var(--text-muted);
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        #dateRange:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 5px var(--accent-blue);
         }
         button {
             font-family: 'JetBrains Mono', monospace;
@@ -127,44 +149,36 @@
             cursor: pointer;
             transition: background-color 0.3s ease;
         }
-
         button:hover {
             background-color: var(--highlight-bg);
         }
-
         button:focus {
             outline: none;
             box-shadow: 0 0 5px var(--accent-blue);
         }
-
         button:active {
             background-color: var(--accent-magenta);
         }
-
-        /* Specific styles for the log button to invert it */
         #toggleLogScale {
-            background: transparent; /* Remove the cream background */
-            color: var(--foreground); /* Text in cream */
-            border: 1px solid var(--foreground); /* Outline in cream */
+            background: transparent;
+            color: var(--foreground);
+            border: 1px solid var(--foreground);
         }
-
         #toggleLogScale:hover {
-            background: var(--highlight-bg); /* Keep hover effect */
-            color: var(--foreground); /* Ensure text stays cream */
-            border-color: var(--foreground); /* Keep outline cream */
+            background: var(--highlight-bg);
+            color: var(--foreground);
+            border-color: var(--foreground);
         }
-
         #toggleLogScale:focus {
             outline: none;
-            box-shadow: 0 0 5px var(--accent-blue); /* Retain focus effect */
-            color: var(--foreground); /* Ensure text stays cream */
-            border-color: var(--foreground); /* Keep outline cream */
+            box-shadow: 0 0 5px var(--accent-blue);
+            color: var(--foreground);
+            border-color: var(--foreground);
         }
-
         #toggleLogScale:active {
-            background: var(--accent-magenta); /* Active state background */
-            color: var(--background); /* Text switches to dark for contrast */
-            border-color: var(--accent-magenta); /* Outline matches active background */
+            background: var(--accent-magenta);
+            color: var(--background);
+            border-color: var(--accent-magenta);
         }
         .arrow-button {
             position: relative;
@@ -190,11 +204,6 @@
             background: var(--accent-magenta);
             color: var(--background);
         }
-        .chart-wrapper {
-            position: relative;
-            flex-grow: 1;
-            height: 100%;
-        }
     </style>
 </head>
 <body>
@@ -206,23 +215,30 @@
         <button class="tab" data-chart-index="1">Volume Only</button>
         <button class="tab" data-chart-index="2">Price Only</button>
     </div>
-    <!-- Rest of your HTML remains unchanged -->
-
     <div class="chart-container" id="chartContainer"> 
-        <button class="arrow-button" id="prevChart">←</button>
-        <div class="chart-wrapper">
-            <canvas id="priceVolumeChart" class="active"></canvas>
-            <canvas id="volumeChart" class="hidden"></canvas>
-            <canvas id="priceChart" class="hidden"></canvas>
-            <div class="log-button-container active">
-                <button id="toggleLogScale">Toggle Log Scale</button>
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-grow: 1;">
+            <button class="arrow-button" id="prevChart">←</button>
+            <div class="chart-wrapper">
+                <canvas id="priceVolumeChart" class="active"></canvas>
+                <canvas id="volumeChart" class="hidden"></canvas>
+                <canvas id="priceChart" class="hidden"></canvas>
             </div>
+            <button class="arrow-button" id="nextChart">→</button>
         </div>
-        <button class="arrow-button" id="nextChart">→</button>
+        <div class="controls-bar active">
+            <select id="dateRange">
+                <option value="1M">1 Month</option>
+                <option value="3M">3 Months</option>
+                <option value="6M">6 Months</option>
+                <option value="1Y">1 Year</option>
+                <option value="5Y">5 Years</option>
+                <option value="ALL" selected>All</option>
+            </select>
+            <button id="toggleLogScale">Toggle Log Scale</button>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
     <script>
         console.log('Chart.js loaded:', typeof Chart !== 'undefined');
 
@@ -245,11 +261,68 @@
         }
 
         prices.sort((a, b) => new Date(b.date) - new Date(a.date));
-        const labels = prices.map(item => item.date).reverse();
-        const priceData = prices.map(item => item.adj_close).reverse();
-        const volumeData = prices.map(item => item.volume || 0).reverse();
-        const volume7MAData = prices.map(item => item.volume_7ma || 0).reverse();
-        const volume90MAData = prices.map(item => item.volume_90ma || 0).reverse();
+        const fullLabels = prices.map(item => item.date).reverse();
+        const fullPriceData = prices.map(item => item.adj_close).reverse();
+        const fullPrice20MAData = prices.map(item => item.adj_close_20ma).reverse();
+        const fullPrice50MAData = prices.map(item => item.adj_close_50ma).reverse();
+        const fullPrice200MAData = prices.map(item => item.adj_close_200ma).reverse();
+        const fullPercPriceData = prices.map(item => item.perc).reverse();
+        const fullVolumeData = prices.map(item => item.volume || 0).reverse();
+        const fullVolume7MAData = prices.map(item => item.volume_7ma || 0).reverse();
+        const fullVolume90MAData = prices.map(item => item.volume_90ma || 0).reverse();
+
+        function filterDataByRange(range) {
+            const now = new Date('2025-02-20');
+            let cutoffDate;
+
+            switch (range) {
+                case '1M':
+                    cutoffDate = new Date(now.setMonth(now.getMonth() - 1));
+                    break;
+                case '3M':
+                    cutoffDate = new Date(now.setMonth(now.getMonth() - 3));
+                    break;
+                case '6M':
+                    cutoffDate = new Date(now.setMonth(now.getMonth() - 6));
+                    break;
+                case '1Y':
+                    cutoffDate = new Date(now.setFullYear(now.getFullYear() - 1));
+                    break;
+                case '5Y':
+                    cutoffDate = new Date(now.setFullYear(now.getFullYear() - 5));
+                    break;
+                case 'ALL':
+                default:
+                    cutoffDate = null;
+            }
+
+            if (!cutoffDate) {
+                return {
+                    labels: fullLabels,
+                    priceData: fullPriceData,
+                    price20MAData: fullPrice20MAData,
+                    price50MAData: fullPrice50MAData,
+                    price200MAData: fullPrice200MAData,
+                    volumeData: fullVolumeData,
+                    volume7MAData: fullVolume7MAData,
+                    volume90MAData: fullVolume90MAData
+                };
+            }
+
+            const filteredPrices = prices.filter(item => new Date(item.date) >= cutoffDate).reverse();
+            return {
+                labels: filteredPrices.map(item => item.date),
+                priceData: filteredPrices.map(item => item.adj_close),
+                price20MAData: filteredPrices.map(item => item.adj_close_20ma),
+                price50MAData: filteredPrices.map(item => item.adj_close_50ma),
+                price200MAData: filteredPrices.map(item => item.adj_close_200ma),
+                volumeData: filteredPrices.map(item => item.volume || 0),
+                volume7MAData: filteredPrices.map(item => item.volume_7ma || 0),
+                volume90MAData: filteredPrices.map(item => item.volume_90ma || 0)
+            };
+        }
+
+        let currentData = filterDataByRange('ALL');
 
         const theme = {
             background: getComputedStyle(document.documentElement).getPropertyValue('--background').trim() || '#1f2023',
@@ -269,12 +342,15 @@
         } else {
             priceVolumeChart = new Chart(priceVolumeCtx, {
                 data: {
-                    labels: labels,
+                    labels: currentData.labels,
                     datasets: [
-                        { type: 'line', label: 'Adjusted Close Price', data: priceData, borderColor: theme.foreground, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-price' },
-                        { type: 'bar', label: 'Volume', data: volumeData, backgroundColor: theme.accentMagenta + '80', borderColor: theme.accentMagenta, borderWidth: 1, yAxisID: 'y-volume', barPercentage: 0.7, categoryPercentage: 0.8 },
-                        { type: 'line', label: 'Volume 7MA', data: volume7MAData, borderColor: theme.textMuted, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-volume' },
-                        { type: 'line', label: 'Volume 90MA', data: volume90MAData, borderColor: theme.foreground, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-volume' }
+                        { type: 'line', label: 'Adjusted Close Price', data: currentData.priceData, borderColor: theme.foreground, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                        { type: 'line', label: 'Price 20MA', data: currentData.price20MAData, borderColor: theme.accentBlue, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                        { type: 'line', label: 'Price 50MA', data: currentData.price50MAData, borderColor: theme.accentMagenta, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                        { type: 'line', label: 'Price 200MA', data: currentData.price200MAData, borderColor: theme.textMuted, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                        { type: 'bar', label: 'Volume', data: currentData.volumeData, backgroundColor: theme.accentMagenta + '80', borderColor: theme.accentMagenta, borderWidth: 1, yAxisID: 'y-volume', barPercentage: 0.7, categoryPercentage: 0.8 },
+                        { type: 'line', label: 'Volume 7MA', data: currentData.volume7MAData, borderColor: theme.textMuted, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-volume', hidden: true },
+                        { type: 'line', label: 'Volume 90MA', data: currentData.volume90MAData, borderColor: theme.foreground, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-volume', hidden: true }
                     ]
                 },
                 options: {
@@ -282,9 +358,32 @@
                     maintainAspectRatio: false,
                     layout: { padding: { top: 20, bottom: 20, left: 20, right: 20 } },
                     scales: {
-                        x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { display: true, color: theme.textMuted + '33', drawBorder: true } },
-                        'y-price': { position: 'left', title: { display: true, text: 'Price', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: false, suggestedMin: Math.min(...priceData) * 0.9, suggestedMax: Math.max(...priceData) * 1.1, grid: { display: true, color: theme.textMuted + '33', drawBorder: true }, type: 'linear', stack: 'price', stackWeight: 1 },
-                        'y-volume': { position: 'right', title: { display: true, text: 'Volume', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: false }, beginAtZero: true, max: Math.max(...volumeData) * 5, stack: 'volume', stackWeight: 5 }
+                        x: { 
+                            type: 'category', 
+                            title: { display: true, text: 'Date', color: theme.foreground }, 
+                            ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, 
+                            grid: { display: true, color: theme.textMuted + '33', drawBorder: true }
+                        },
+                        'y-price': { 
+                            position: 'left', 
+                            title: { display: true, text: 'Price', color: theme.foreground }, 
+                            ticks: { color: theme.textMuted }, 
+                            beginAtZero: false, suggestedMin: Math.min(...currentData.priceData) * 0.9, suggestedMax: Math.max(...currentData.priceData) * 1.1, 
+                            grid: { display: true, color: theme.textMuted + '33', drawBorder: true }, 
+                            type: 'linear', 
+                            stack: 'price', 
+                            stackWeight: 1 
+                        },
+                        'y-volume': { 
+                            position: 'right', 
+                            title: { display: true, text: 'Volume', color: theme.foreground }, 
+                            ticks: { color: theme.textMuted }, 
+                            grid: { display: false }, 
+                            beginAtZero: true, 
+                            max: Math.max(...currentData.volumeData) * 5, 
+                            stack: 'volume', 
+                            stackWeight: 5 
+                        }
                     },
                     plugins: {
                         title: { display: true, text: 'Price + Volume Chart', color: theme.foreground },
@@ -303,11 +402,11 @@
         } else {
             const volumeChart = new Chart(volumeCtx, {
                 data: {
-                    labels: labels,
+                    labels: fullLabels,
                     datasets: [
-                        { type: 'bar', label: 'Volume', data: volumeData, backgroundColor: theme.accentMagenta + '80', borderColor: theme.accentMagenta, borderWidth: 1, yAxisID: 'y' },
-                        { type: 'line', label: 'Volume 7MA', data: volume7MAData, borderColor: theme.textMuted, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' },
-                        { type: 'line', label: 'Volume 90MA', data: volume90MAData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' }
+                        { type: 'bar', label: 'Volume', data: fullVolumeData, backgroundColor: theme.accentMagenta + '80', borderColor: theme.accentMagenta, borderWidth: 1, yAxisID: 'y' },
+                        { type: 'line', label: 'Volume 7MA', data: fullVolume7MAData, borderColor: theme.textMuted, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' },
+                        { type: 'line', label: 'Volume 90MA', data: fullVolume90MAData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' }
                     ]
                 },
                 options: {
@@ -315,7 +414,7 @@
                     maintainAspectRatio: false,
                     scales: {
                         x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { color: theme.graphBg + '33' } },
-                        y: { title: { display: true, text: 'Volume', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: true, max: Math.max(...volumeData) * 5, grid: { color: theme.graphBg + '33' } }
+                        y: { title: { display: true, text: 'Volume', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: true, max: Math.max(...fullVolumeData) * 5, grid: { color: theme.graphBg + '33' } }
                     },
                     plugins: {
                         title: { display: true, text: 'Volume Chart', color: theme.foreground },
@@ -333,15 +432,15 @@
         } else {
             const priceChart = new Chart(priceCtx, {
                 data: {
-                    labels: labels,
-                    datasets: [{ type: 'line', label: 'Adjusted Close Price', data: priceData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' }]
+                    labels: fullLabels,
+                    datasets: [{ type: 'line', label: 'Adjusted Close Price', data: fullPriceData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
                         x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { color: theme.graphBg + '33' } },
-                        y: { title: { display: true, text: 'Price', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: false, suggestedMin: Math.min(...priceData) * 0.9, suggestedMax: Math.max(...priceData) * 1.1, grid: { color: theme.graphBg + '33' } }
+                        y: { title: { display: true, text: 'Price', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: false, suggestedMin: Math.min(...fullPriceData) * 0.9, suggestedMax: Math.max(...fullPriceData) * 1.1, grid: { color: theme.graphBg + '33' } }
                     },
                     plugins: {
                         title: { display: true, text: 'Price Chart', color: theme.foreground },
@@ -354,10 +453,30 @@
             charts.push(priceChart);
         }
 
-        // Chart Navigation
+        const dateRangeSelector = document.getElementById('dateRange');
+        dateRangeSelector.addEventListener('change', function() {
+            const selectedRange = this.value;
+            currentData = filterDataByRange(selectedRange);
+            
+            if (priceVolumeChart) {
+                priceVolumeChart.data.labels = currentData.labels;
+                priceVolumeChart.data.datasets[0].data = currentData.priceData;
+                priceVolumeChart.data.datasets[1].data = currentData.volumeData;
+                priceVolumeChart.data.datasets[2].data = currentData.volume7MAData;
+                priceVolumeChart.data.datasets[3].data = currentData.volume90MAData;
+                
+                const maxVolume = Math.max(...currentData.volumeData);
+                priceVolumeChart.options.scales['y-volume'].max = maxVolume * 5;
+                priceVolumeChart.options.scales['y-price'].suggestedMin = Math.min(...currentData.priceData) * 0.9;
+                priceVolumeChart.options.scales['y-price'].suggestedMax = Math.max(...currentData.priceData) * 1.1;
+                
+                priceVolumeChart.update();
+            }
+        });
+
         let activeChartIndex = 0;
         const chartCanvases = document.querySelectorAll('.chart-wrapper > canvas');
-        const logButtonContainer = document.querySelector('.log-button-container');
+        const controlsBar = document.querySelector('.controls-bar');
         const prevButton = document.getElementById('prevChart');
         const nextButton = document.getElementById('nextChart');
         const tabs = document.querySelectorAll('.tab');
@@ -381,20 +500,18 @@
                 }
             });
 
-            // Show/hide log button container
             if (activeChartIndex === 0) {
-                logButtonContainer.classList.add('active');
+                controlsBar.classList.add('active');
                 if (priceVolumeChart) {
-                    priceVolumeChart.resize(); // Force resize when switching to Price + Volume
+                    priceVolumeChart.resize();
                 }
             } else {
-                logButtonContainer.classList.remove('active');
+                controlsBar.classList.remove('active');
             }
         }
 
-        updateChartVisibility(); // Initialize
+        updateChartVisibility();
 
-        // Tab navigation
         tabs.forEach(tab => {
             tab.addEventListener('click', function() {
                 activeChartIndex = parseInt(this.getAttribute('data-chart-index'));
@@ -402,7 +519,6 @@
             });
         });
 
-        // Arrow key navigation
         document.addEventListener('keydown', function(event) {
             if (event.key === 'ArrowRight') {
                 activeChartIndex = (activeChartIndex + 1) % chartCanvases.length;
@@ -413,7 +529,6 @@
             }
         });
 
-        // Arrow button navigation
         nextButton.addEventListener('click', function() {
             activeChartIndex = (activeChartIndex + 1) % chartCanvases.length;
             updateChartVisibility();
@@ -424,7 +539,6 @@
             updateChartVisibility();
         });
 
-        // Toggle Log Scale
         const toggleLogScaleButton = document.getElementById('toggleLogScale');
         if (toggleLogScaleButton) {
             toggleLogScaleButton.addEventListener('click', function() {
