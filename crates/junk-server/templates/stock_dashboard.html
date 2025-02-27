@@ -245,9 +245,9 @@
         let prices;
         try {
             const prices_json = '{{ prices | safe }}';
+            // console.log('Raw prices data:', prices_json);
             prices = JSON.parse(prices_json);
-            console.log('Raw prices data:', prices_json);
-            console.log('Parsed prices:', prices);
+            // console.log('Parsed prices:', prices);
         } catch (e) {
             console.error('Error parsing prices:', e);
             prices = [
