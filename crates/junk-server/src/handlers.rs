@@ -166,7 +166,14 @@ pub async fn stock_dashboard(
                             'gross_profit', gross_profit,
                             'operating_income', operating_income,
                             'accumulated_earnings', accumulated_earnings,
-                            'debt_to_equity', debt_to_equity
+                            'debt', debt,
+                            'equity', equity,
+                            'debt_to_equity', debt_to_equity,
+                            'assets', assets,
+                            'market_cap', market_cap,
+                            'shares_outstanding', shares_outstanding,
+                            'float', float,
+                            'value_of_shares_bought_back', value_of_shares_bought_back
                         )
                         ORDER BY end_date DESC
                     )

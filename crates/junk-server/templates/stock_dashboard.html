@@ -70,17 +70,9 @@
         .tab:hover {
             background: var(--highlight-bg);
         }
-        .tab:focus {
-            outline: none;
-            box-shadow: 0 0 5px var(--accent-blue);
-        }
-        .tab:active {
-            background: var(--accent-magenta);
-            color: var(--background);
-        }
         .chart-container {
             width: 100%;
-            height: calc(100vh - 70px); /* Adjusted for search bar (~20px) + tab bar (~50px) */
+            height: calc(100vh - 70px); /* Adjusted for search bar + tab bar + controls */
             padding: 0 20px;
             box-sizing: border-box;
             position: relative;
@@ -119,7 +111,6 @@
             align-items: center;
             gap: 20px;
             visibility: hidden; /* Hidden by default, shown only for Price + Volume */
-            z-index: 2;
         }
         .controls-bar.active {
             visibility: visible;
@@ -132,7 +123,6 @@
             border-radius: 4px;
             font-family: 'JetBrains Mono', monospace;
             font-size: 14px;
-            transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
         #dateRange:focus {
             outline: none;
@@ -152,10 +142,6 @@
         button:hover {
             background-color: var(--highlight-bg);
         }
-        button:focus {
-            outline: none;
-            box-shadow: 0 0 5px var(--accent-blue);
-        }
         button:active {
             background-color: var(--accent-magenta);
         }
@@ -169,19 +155,12 @@
             color: var(--foreground);
             border-color: var(--foreground);
         }
-        #toggleLogScale:focus {
-            outline: none;
-            box-shadow: 0 0 5px var(--accent-blue);
-            color: var(--foreground);
-            border-color: var(--foreground);
-        }
         #toggleLogScale:active {
             background: var(--accent-magenta);
             color: var(--background);
             border-color: var(--accent-magenta);
         }
         .arrow-button {
-            position: relative;
             font-size: 24px;
             width: 40px;
             height: 40px;
@@ -189,20 +168,32 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            z-index: 2;
             background: var(--background);
             color: var(--foreground);
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
         }
         .arrow-button:hover {
             background: var(--highlight-bg);
-            color: var(--background);
-        }
-        .arrow-button:focus {
-            box-shadow: 0 0 5px var(--accent-blue);
         }
         .arrow-button:active {
             background: var(--accent-magenta);
             color: var(--background);
+        }
+        .split-chart-container {
+            display: flex;
+            flex-wrap: wrap;
+            width: 100%;
+            height: 100%;
+        }
+        .chart-half {
+            width: 50%;
+            height: 50%;
+            position: relative;
+            padding: 10px;
+            box-sizing: border-box;
         }
     </style>
 </head>
@@ -211,17 +202,32 @@
         <input type="text" id="searchInput" placeholder="Search stocks..." />
     </div>
     <div class="tab-bar">
-        <button class="tab active" data-chart-index="0">Price + Volume</button>
-        <button class="tab" data-chart-index="1">Volume Only</button>
-        <button class="tab" data-chart-index="2">Price Only</button>
+        <button class="tab active" data-chart-index="0">Price & Volume</button>
+        <button class="tab" data-chart-index="1">Earnings</button>
+        <button class="tab" data-chart-index="2">Debt & Equity</button>
+        <button class="tab" data-chart-index="3">Market Mechanics</button>
     </div>
     <div class="chart-container" id="chartContainer"> 
         <div style="display: flex; align-items: center; justify-content: space-between; flex-grow: 1;">
             <button class="arrow-button" id="prevChart">←</button>
             <div class="chart-wrapper">
                 <canvas id="priceVolumeChart" class="active"></canvas>
-                <canvas id="volumeChart" class="hidden"></canvas>
-                <canvas id="priceChart" class="hidden"></canvas>
+                <canvas id="earningsChart" class="hidden"></canvas>
+                <canvas id="debtChart" class="hidden"></canvas>
+                <div id="marketMechanicsContainer" class="hidden split-chart-container">
+                    <div class="chart-half">
+                        <canvas id="marketCapChart"></canvas>
+                    </div>
+                    <div class="chart-half">
+                        <canvas id="sharesOutstandingChart"></canvas>
+                    </div>
+                    <div class="chart-half">
+                        <canvas id="floatChart"></canvas>
+                    </div>
+                    <div class="chart-half">
+                        <canvas id="sharesBoughtBackChart"></canvas>
+                    </div>
+                </div>
             </div>
             <button class="arrow-button" id="nextChart">→</button>
         </div>
@@ -239,86 +245,138 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.2/dist/chartjs-plugin-annotation.min.js"></script>
     <script>
         console.log('Chart.js loaded:', typeof Chart !== 'undefined');
+        console.log('Annotation plugin loaded:', typeof Chart.Annotation !== 'undefined');
 
         let prices;
+        let financials;
         try {
             const prices_json = '{{ prices | safe }}';
-            // console.log('Raw prices data:', prices_json);
             prices = JSON.parse(prices_json);
-            // console.log('Parsed prices:', prices);
+            const fin_json = '{{ financials | safe }}';
+            financials = JSON.parse(fin_json);
         } catch (e) {
-            console.error('Error parsing prices:', e);
+            console.error('Error parsing data:', e);
             prices = [
-                { date: '2020-01-02', adj_close: 140.20, volume: 350000000, volume_7ma: 320000000, volume_90ma: 300000000 },
-                { date: '2020-01-03', adj_close: 145.60, volume: 280000000, volume_7ma: 310000000, volume_90ma: 290000000 },
-                { date: '2020-01-06', adj_close: 148.20, volume: 300000000, volume_7ma: 300000000, volume_90ma: 280000000 },
-                { date: '2020-01-07', adj_close: 147.80, volume: 250000000, volume_7ma: 290000000, volume_90ma: 270000000 },
-                { date: '2025-02-01', adj_close: 280.00, volume: 150000000, volume_7ma: 200000000, volume_90ma: 220000000 }
+                { date: '2020-01-02', adj_close: 140.20, adj_close_20ma: 138.50, adj_close_50ma: 135.00, adj_close_200ma: 130.00, volume: 350000000 },
+                { date: '2020-01-03', adj_close: 145.60, adj_close_20ma: 139.00, adj_close_50ma: 136.00, adj_close_200ma: 131.00, volume: 280000000 },
+                { date: '2020-01-06', adj_close: 148.20, adj_close_20ma: 140.00, adj_close_50ma: 137.00, adj_close_200ma: 132.00, volume: 300000000 },
+                { date: '2020-01-07', adj_close: 147.80, adj_close_20ma: 141.00, adj_close_50ma: 138.00, adj_close_200ma: 133.00, volume: 250000000 },
+                { date: '2025-02-01', adj_close: 280.00, adj_close_20ma: 260.00, adj_close_50ma: 240.00, adj_close_200ma: 200.00, volume: 150000000 }
             ];
-            console.log('Using fallback data:', prices);
+            financials = [
+                { end_date: '2024-10-18', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 110000000000, equity: 58000000000, assets: 168000000000, market_cap: 450000000000, shares_outstanding: 13500000000, float: 10000000000, value_of_shares_bought_back: 500000000 },
+                { end_date: '2024-09-28', accumulated_earnings: -19154000000, debt_to_equity: 1.872326602282704, earnings: null, earnings_perc: 0, revenue: null, debt: 108000000000, equity: 57000000000, assets: 165000000000, market_cap: 420000000000, shares_outstanding: 13600000000, float: 10100000000, value_of_shares_bought_back: 450000000 },
+                { end_date: '2024-07-19', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 106000000000, equity: 55000000000, assets: 161000000000, market_cap: 410000000000, shares_outstanding: 13700000000, float: 10200000000, value_of_shares_bought_back: 400000000 },
+                { end_date: '2024-06-29', accumulated_earnings: -4726000000, debt_to_equity: 1.5186184565569347, earnings: 21448000000, earnings_perc: 0.25004371801298714, revenue: 85783000000, debt: 104000000000, equity: 52000000000, assets: 156000000000, market_cap: 400000000000, shares_outstanding: 13800000000, float: 10300000000, value_of_shares_bought_back: 350000000 },
+                { end_date: '2024-04-19', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 102000000000, equity: 50000000000, assets: 152000000000, market_cap: 390000000000, shares_outstanding: 14000000000, float: 10400000000, value_of_shares_bought_back: 300000000 },
+                { end_date: '2024-03-30', accumulated_earnings: 4339000000, debt_to_equity: 1.4096827236703777, earnings: 23636000000, earnings_perc: 0.26044318094167684, revenue: 90753000000, debt: 100000000000, equity: 48000000000, assets: 148000000000, market_cap: 380000000000, shares_outstanding: 14500000000, float: 10500000000, value_of_shares_bought_back: 200000000 }
+            ];
+            console.log('Using fallback data:', { prices, financials });
         }
 
+        // Sort and prepare price data
         prices.sort((a, b) => new Date(b.date) - new Date(a.date));
         const fullLabels = prices.map(item => item.date).reverse();
         const fullPriceData = prices.map(item => item.adj_close).reverse();
         const fullPrice20MAData = prices.map(item => item.adj_close_20ma).reverse();
         const fullPrice50MAData = prices.map(item => item.adj_close_50ma).reverse();
         const fullPrice200MAData = prices.map(item => item.adj_close_200ma).reverse();
-        const fullPercPriceData = prices.map(item => item.perc).reverse();
         const fullVolumeData = prices.map(item => item.volume || 0).reverse();
-        const fullVolume7MAData = prices.map(item => item.volume_7ma || 0).reverse();
-        const fullVolume90MAData = prices.map(item => item.volume_90ma || 0).reverse();
+
+        // Sort and prepare financials data
+        financials.sort((a, b) => new Date(b.end_date) - new Date(a.end_date));
+        const finLabels = financials.map(item => item.end_date).reverse();
+
+        // Linear interpolation function
+        function interpolateData(data) {
+            const result = [...data];
+            for (let i = 0; i < result.length; i++) {
+                if (result[i] === null) {
+                    let prevVal = null, nextVal = null, prevIndex = null, nextIndex = null;
+                    for (let j = i - 1; j >= 0; j--) {
+                        if (result[j] !== null) {
+                            prevVal = result[j];
+                            prevIndex = j;
+                            break;
+                        }
+                    }
+                    for (let j = i + 1; j < result.length; j++) {
+                        if (result[j] !== null) {
+                            nextVal = result[j];
+                            nextIndex = j;
+                            break;
+                        }
+                    }
+                    if (prevVal !== null && nextVal !== null) {
+                        const steps = nextIndex - prevIndex;
+                        const stepValue = (nextVal - prevVal) / steps;
+                        result[i] = prevVal + stepValue * (i - prevIndex);
+                    } else if (prevVal !== null) {
+                        result[i] = prevVal;
+                    } else if (nextVal !== null) {
+                        result[i] = nextVal;
+                    }
+                }
+            }
+            return result;
+        }
+
+        const rawFinRevenueData = financials.map(item => item.revenue ? item.revenue / 1e9 : null).reverse();
+        const rawFinEarningsData = financials.map(item => item.earnings ? item.earnings / 1e9 : null).reverse();
+        const rawFinAccumulatedEarningsData = financials.map(item => item.accumulated_earnings ? item.accumulated_earnings / 1e9 : null).reverse();
+        const rawFinDebtToEquityData = financials.map(item => item.debt_to_equity || null).reverse();
+        const rawFinEarningsPercData = financials.map(item => item.earnings_perc * 100 || null).reverse();
+        
+        // New data for Debt & Equity tab
+        const rawFinDebtData = financials.map(item => item.debt ? item.debt / 1e9 : null).reverse();
+        const rawFinEquityData = financials.map(item => item.equity ? item.equity / 1e9 : null).reverse();
+        const rawFinAssetsData = financials.map(item => item.assets ? item.assets / 1e9 : null).reverse();
+        
+        // New data for Market Mechanics tab
+        const rawFinMarketCapData = financials.map(item => item.market_cap ? item.market_cap / 1e9 : null).reverse();
+        const rawFinSharesOutstandingData = financials.map(item => item.shares_outstanding ? item.shares_outstanding / 1e6 : null).reverse();
+        const rawFinFloatData = financials.map(item => item.float ? item.float / 1e6 : null).reverse();
+        const rawFinSharesBoughtBackData = financials.map(item => item.value_of_shares_bought_back ? item.value_of_shares_bought_back / 1e6 : null).reverse();
+
+        const finRevenueData = interpolateData(rawFinRevenueData);
+        const finEarningsData = interpolateData(rawFinEarningsData);
+        const finAccumulatedEarningsData = interpolateData(rawFinAccumulatedEarningsData);
+        const finDebtToEquityData = interpolateData(rawFinDebtToEquityData);
+        const finEarningsPercData = interpolateData(rawFinEarningsPercData);
+        
+        // Interpolated data for Debt & Equity tab
+        const finDebtData = interpolateData(rawFinDebtData);
+        const finEquityData = interpolateData(rawFinEquityData);
+        const finAssetsData = interpolateData(rawFinAssetsData);
+        
+        // Interpolated data for Market Mechanics tab
+        const finMarketCapData = interpolateData(rawFinMarketCapData);
+        const finSharesOutstandingData = interpolateData(rawFinSharesOutstandingData);
+        const finFloatData = interpolateData(rawFinFloatData);
+        const finSharesBoughtBackData = interpolateData(rawFinSharesBoughtBackData);
 
         function filterDataByRange(range) {
-            const now = new Date('2025-02-20');
+            const now = new Date('2025-02-27');
             let cutoffDate;
-
             switch (range) {
-                case '1M':
-                    cutoffDate = new Date(now.setMonth(now.getMonth() - 1));
-                    break;
-                case '3M':
-                    cutoffDate = new Date(now.setMonth(now.getMonth() - 3));
-                    break;
-                case '6M':
-                    cutoffDate = new Date(now.setMonth(now.getMonth() - 6));
-                    break;
-                case '1Y':
-                    cutoffDate = new Date(now.setFullYear(now.getFullYear() - 1));
-                    break;
-                case '5Y':
-                    cutoffDate = new Date(now.setFullYear(now.getFullYear() - 5));
-                    break;
-                case 'ALL':
-                default:
-                    cutoffDate = null;
+                case '1M': cutoffDate = new Date(now.setMonth(now.getMonth() - 1)); break;
+                case '3M': cutoffDate = new Date(now.setMonth(now.getMonth() - 3)); break;
+                case '6M': cutoffDate = new Date(now.setMonth(now.getMonth() - 6)); break;
+                case '1Y': cutoffDate = new Date(now.setFullYear(now.getFullYear() - 1)); break;
+                case '5Y': cutoffDate = new Date(now.setFullYear(now.getFullYear() - 5)); break;
+                case 'ALL': default: cutoffDate = null;
             }
-
-            if (!cutoffDate) {
-                return {
-                    labels: fullLabels,
-                    priceData: fullPriceData,
-                    price20MAData: fullPrice20MAData,
-                    price50MAData: fullPrice50MAData,
-                    price200MAData: fullPrice200MAData,
-                    volumeData: fullVolumeData,
-                    volume7MAData: fullVolume7MAData,
-                    volume90MAData: fullVolume90MAData
-                };
-            }
-
-            const filteredPrices = prices.filter(item => new Date(item.date) >= cutoffDate).reverse();
+            const filteredPrices = cutoffDate ? prices.filter(item => new Date(item.date) >= cutoffDate).reverse() : prices.reverse();
             return {
                 labels: filteredPrices.map(item => item.date),
                 priceData: filteredPrices.map(item => item.adj_close),
                 price20MAData: filteredPrices.map(item => item.adj_close_20ma),
                 price50MAData: filteredPrices.map(item => item.adj_close_50ma),
                 price200MAData: filteredPrices.map(item => item.adj_close_200ma),
-                volumeData: filteredPrices.map(item => item.volume || 0),
-                volume7MAData: filteredPrices.map(item => item.volume_7ma || 0),
-                volume90MAData: filteredPrices.map(item => item.volume_90ma || 0)
+                volumeData: filteredPrices.map(item => item.volume || 0)
             };
         }
 
@@ -330,183 +388,410 @@
             accentBlue: getComputedStyle(document.documentElement).getPropertyValue('--accent-blue').trim() || '#58b2dc',
             accentMagenta: getComputedStyle(document.documentElement).getPropertyValue('--accent-magenta').trim() || '#e03c8a',
             textMuted: getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#707c74',
-            graphBg: getComputedStyle(document.documentElement).getPropertyValue('--graph-bg').trim() || '#212121'
+            graphBg: getComputedStyle(document.documentElement).getPropertyValue('--graph-bg').trim() || '#212121',
+            accentRed: '#ff6b6b',
+            accentOrange: '#ffa94d'
         };
 
         const charts = [];
 
+        // Price + Volume Chart with MAs
         const priceVolumeCtx = document.getElementById('priceVolumeChart').getContext('2d');
-        let priceVolumeChart;
-        if (!priceVolumeCtx) {
-            console.error('Price + Volume chart context not found!');
-        } else {
-            priceVolumeChart = new Chart(priceVolumeCtx, {
-                data: {
-                    labels: currentData.labels,
-                    datasets: [
-                        { type: 'line', label: 'Adjusted Close Price', data: currentData.priceData, borderColor: theme.foreground, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-price' },
-                        { type: 'line', label: 'Price 20MA', data: currentData.price20MAData, borderColor: theme.accentBlue, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
-                        { type: 'line', label: 'Price 50MA', data: currentData.price50MAData, borderColor: theme.accentMagenta, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
-                        { type: 'line', label: 'Price 200MA', data: currentData.price200MAData, borderColor: theme.textMuted, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
-                        { type: 'bar', label: 'Volume', data: currentData.volumeData, backgroundColor: theme.accentMagenta + '80', borderColor: theme.accentMagenta, borderWidth: 1, yAxisID: 'y-volume', barPercentage: 0.7, categoryPercentage: 0.8 },
-                        { type: 'line', label: 'Volume 7MA', data: currentData.volume7MAData, borderColor: theme.textMuted, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-volume', hidden: true },
-                        { type: 'line', label: 'Volume 90MA', data: currentData.volume90MAData, borderColor: theme.foreground, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-volume', hidden: true }
-                    ]
+        const priceVolumeChart = new Chart(priceVolumeCtx, {
+            data: {
+                labels: currentData.labels,
+                datasets: [
+                    { type: 'line', label: 'Adjusted Close Price', data: currentData.priceData, borderColor: theme.foreground, borderWidth: 1, fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                    { type: 'line', label: '20-Day MA', data: currentData.price20MAData, borderColor: theme.accentBlue, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                    { type: 'line', label: '50-Day MA', data: currentData.price50MAData, borderColor: theme.accentMagenta, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                    { type: 'line', label: '200-Day MA', data: currentData.price200MAData, borderColor: theme.textMuted, borderWidth: 1, borderDash: [5, 5], fill: false, pointRadius: 0, yAxisID: 'y-price' },
+                    { type: 'bar', label: 'Volume', data: currentData.volumeData, backgroundColor: theme.accentMagenta + '80', borderColor: theme.accentMagenta, borderWidth: 1, yAxisID: 'y-volume', barPercentage: 0.7, categoryPercentage: 0.8 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { display: true, color: theme.textMuted + '33' } },
+                    'y-price': { position: 'left', title: { display: true, text: 'Price', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: false, suggestedMin: Math.min(...currentData.priceData) * 0.9, suggestedMax: Math.max(...currentData.priceData) * 1.1, grid: { display: true, color: theme.textMuted + '33' } },
+                    'y-volume': { position: 'right', title: { display: true, text: 'Volume', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: false }, beginAtZero: true, max: Math.max(...currentData.volumeData) * 5 }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    layout: { padding: { top: 20, bottom: 20, left: 20, right: 20 } },
-                    scales: {
-                        x: { 
-                            type: 'category', 
-                            title: { display: true, text: 'Date', color: theme.foreground }, 
-                            ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, 
-                            grid: { display: true, color: theme.textMuted + '33', drawBorder: true }
-                        },
-                        'y-price': { 
-                            position: 'left', 
-                            title: { display: true, text: 'Price', color: theme.foreground }, 
-                            ticks: { color: theme.textMuted }, 
-                            beginAtZero: false, suggestedMin: Math.min(...currentData.priceData) * 0.9, suggestedMax: Math.max(...currentData.priceData) * 1.1, 
-                            grid: { display: true, color: theme.textMuted + '33', drawBorder: true }, 
-                            type: 'linear', 
-                            stack: 'price', 
-                            stackWeight: 1 
-                        },
-                        'y-volume': { 
-                            position: 'right', 
-                            title: { display: true, text: 'Volume', color: theme.foreground }, 
-                            ticks: { color: theme.textMuted }, 
-                            grid: { display: false }, 
-                            beginAtZero: true, 
-                            max: Math.max(...currentData.volumeData) * 5, 
-                            stack: 'volume', 
-                            stackWeight: 5 
-                        }
-                    },
-                    plugins: {
-                        title: { display: true, text: 'Price + Volume Chart', color: theme.foreground },
-                        tooltip: { mode: 'index', intersect: false, callbacks: { label: function(context) { return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`; } }, backgroundColor: theme.graphBg, bodyColor: theme.foreground, titleColor: theme.foreground },
-                        legend: { labels: { color: theme.foreground } }
-                    },
-                    elements: { line: { tension: 0.1 } }
+                plugins: {
+                    title: { display: true, text: 'Price + Volume with MAs', color: theme.foreground },
+                    tooltip: { mode: 'index', intersect: false, callbacks: { label: function(context) { return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`; } }, backgroundColor: theme.graphBg, bodyColor: theme.foreground, titleColor: theme.foreground },
+                    legend: { labels: { color: theme.foreground } }
                 }
-            });
-            charts.push(priceVolumeChart);
-        }
+            }
+        });
+        charts.push(priceVolumeChart);
 
-        const volumeCtx = document.getElementById('volumeChart').getContext('2d');
-        if (!volumeCtx) {
-            console.error('Volume chart context not found!');
-        } else {
-            const volumeChart = new Chart(volumeCtx, {
-                data: {
-                    labels: fullLabels,
-                    datasets: [
-                        { type: 'bar', label: 'Volume', data: fullVolumeData, backgroundColor: theme.accentMagenta + '80', borderColor: theme.accentMagenta, borderWidth: 1, yAxisID: 'y' },
-                        { type: 'line', label: 'Volume 7MA', data: fullVolume7MAData, borderColor: theme.textMuted, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' },
-                        { type: 'line', label: 'Volume 90MA', data: fullVolume90MAData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' }
-                    ]
+        // Earnings Metrics Chart (with Revenue and y=0 dashed line)
+        const earningsCtx = document.getElementById('earningsChart').getContext('2d');
+        const earningsChart = new Chart(earningsCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { label: 'Revenue (Billions)', data: finRevenueData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 2 },
+                    { label: 'Earnings (Billions)', data: finEarningsData, borderColor: theme.accentMagenta, borderWidth: 2, fill: false, pointRadius: 2 },
+                    { label: 'Accumulated Earnings (Billions)', data: finAccumulatedEarningsData, borderColor: theme.textMuted, borderWidth: 2, fill: false, pointRadius: 2 },
+                    // { label: 'Earnings % (x100)', data: finEarningsPercData, borderColor: theme.foreground, borderWidth: 2, fill: false, pointRadius: 3, yAxisID: 'y-perc' }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'category', title: { display: true, text: 'End Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { display: true, color: theme.textMuted + '33' } },
+                    y: { title: { display: true, text: 'Billions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: true, color: theme.textMuted + '33' } }
+                    // 'y-perc': { position: 'right', title: { display: true, text: 'Earnings %', color: theme.foreground }, ticks: { color: theme.textMuted, callback: value => value + '%' }, grid: { display: false }, beginAtZero: true }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { color: theme.graphBg + '33' } },
-                        y: { title: { display: true, text: 'Volume', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: true, max: Math.max(...fullVolumeData) * 5, grid: { color: theme.graphBg + '33' } }
+                plugins: {
+                    title: { display: true, text: 'Earnings Metrics', color: theme.foreground },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                let value = context.parsed.y;
+                                if (context.dataset.label.includes('Billions')) value = `${value.toLocaleString()}B`;
+                                else if (context.dataset.label.includes('Earnings %')) value = `${value.toFixed(2)}%`;
+                                return `${context.dataset.label}: ${value}`; 
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
                     },
-                    plugins: {
-                        title: { display: true, text: 'Volume Chart', color: theme.foreground },
-                        tooltip: { mode: 'index', intersect: false, callbacks: { label: function(context) { return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`; } }, backgroundColor: theme.graphBg, bodyColor: theme.foreground, titleColor: theme.foreground },
-                        legend: { labels: { color: theme.foreground } }
+                    legend: { labels: { color: theme.foreground } },
+                    annotation: {
+                        annotations: {
+                            zeroLine: {
+                                type: 'line',
+                                yMin: 0,
+                                yMax: 0,
+                                borderColor: theme.textMuted,
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                label: {
+                                    enabled: true,
+                                    content: 'Y=0',
+                                    position: 'start',
+                                    backgroundColor: theme.graphBg,
+                                    color: theme.foreground,
+                                    font: { size: 12 }
+                                }
+                            }
+                        }
                     }
                 }
-            });
-            charts.push(volumeChart);
-        }
+            }
+        });
+        charts.push(earningsChart);
 
-        const priceCtx = document.getElementById('priceChart').getContext('2d');
-        if (!priceCtx) {
-            console.error('Price chart context not found!');
-        } else {
-            const priceChart = new Chart(priceCtx, {
-                data: {
-                    labels: fullLabels,
-                    datasets: [{ type: 'line', label: 'Adjusted Close Price', data: fullPriceData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 0, yAxisID: 'y' }]
+        // Updated Debt & Equity Chart with filled areas
+        const debtCtx = document.getElementById('debtChart').getContext('2d');
+        const debtChart = new Chart(debtCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { 
+                        label: 'Debt (Billions)', 
+                        data: finDebtData, 
+                        borderColor: theme.accentRed, 
+                        borderWidth: 2, 
+                        backgroundColor: theme.accentRed + '33',
+                        fill: true,
+                        pointRadius: 3 
+                    },
+                    { 
+                        label: 'Equity (Billions)', 
+                        data: finEquityData, 
+                        borderColor: theme.accentBlue, 
+                        borderWidth: 2, 
+                        backgroundColor: theme.accentBlue + '33',
+                        fill: true,
+                        pointRadius: 3 
+                    },
+                    { 
+                        label: 'Assets (Billions)', 
+                        data: finAssetsData, 
+                        borderColor: theme.accentOrange, 
+                        borderWidth: 2, 
+                        fill: false,
+                        pointRadius: 3 
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'category', title: { display: true, text: 'End Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { display: true, color: theme.textMuted + '33' } },
+                    y: { title: { display: true, text: 'Billions ($)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.textMuted + '33' }, beginAtZero: true }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { color: theme.graphBg + '33' } },
-                        y: { title: { display: true, text: 'Price', color: theme.foreground }, ticks: { color: theme.textMuted }, beginAtZero: false, suggestedMin: Math.min(...fullPriceData) * 0.9, suggestedMax: Math.max(...fullPriceData) * 1.1, grid: { color: theme.graphBg + '33' } }
+                plugins: {
+                    title: { display: true, text: 'Debt & Equity Metrics', color: theme.foreground },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                const value = context.parsed.y.toFixed(2);
+                                let result = `${context.dataset.label}: ${value}B`;
+                                
+                                // Add debt to equity ratio when hovering
+                                if (context.datasetIndex <= 1) { // Only for debt and equity
+                                    const index = context.dataIndex;
+                                    const debt = finDebtData[index];
+                                    const equity = finEquityData[index];
+                                    if (debt !== null && equity !== null && equity !== 0) {
+                                        const debtToEquity = (debt / equity).toFixed(2);
+                                        result += ` (Debt/Equity: ${debtToEquity})`;
+                                    }
+                                }
+                                
+                                return result;
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
                     },
-                    plugins: {
-                        title: { display: true, text: 'Price Chart', color: theme.foreground },
-                        tooltip: { mode: 'index', intersect: false, callbacks: { label: function(context) { return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`; } }, backgroundColor: theme.graphBg, bodyColor: theme.foreground, titleColor: theme.foreground },
-                        legend: { labels: { color: theme.foreground } }
-                    },
-                    elements: { line: { tension: 0.1 } }
+                    legend: { labels: { color: theme.foreground } }
                 }
-            });
-            charts.push(priceChart);
-        }
+            }
+        });
+        charts.push(debtChart);
 
+        // Market Mechanics Charts
+        const marketCapCtx = document.getElementById('marketCapChart').getContext('2d');
+        const marketCapChart = new Chart(marketCapCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { 
+                        label: 'Market Cap (Billions)', 
+                        data: finMarketCapData, 
+                        borderColor: theme.accentMagenta, 
+                        borderWidth: 2, 
+                        backgroundColor: theme.accentMagenta + '33',
+                        fill: true,
+                        pointRadius: 3 
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
+                    y: { title: { display: true, text: 'Billions ($)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
+                },
+                plugins: {
+                    title: { display: true, text: 'Market Cap', color: theme.foreground },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                return `${context.dataset.label}: $${context.parsed.y.toFixed(2)}B`; 
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
+                    },
+                    legend: { labels: { color: theme.foreground } }
+                }
+            }
+        });
+
+        const floatCtx = document.getElementById('floatChart').getContext('2d');
+        const floatChart = new Chart(floatCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { 
+                        label: 'Float (Millions)', 
+                        data: finFloatData, 
+                        borderColor: theme.accentRed, 
+                        borderWidth: 2, 
+                        backgroundColor: theme.accentRed + '33',
+                        fill: true,
+                        pointRadius: 3 
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
+                    y: { title: { display: true, text: 'Millions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
+                },
+                plugins: {
+                    title: { display: true, text: 'Float', color: theme.foreground },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}M`; 
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
+                    },
+                    legend: { labels: { color: theme.foreground } }
+                }
+            }
+        });
+
+        const sharesOutstandingCtx = document.getElementById('sharesOutstandingChart').getContext('2d');
+        const sharesOutstandingChart = new Chart(sharesOutstandingCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { 
+                        label: 'Shares Outstanding (Millions)', 
+                        data: finSharesOutstandingData, 
+                        borderColor: theme.accentBlue, 
+                        borderWidth: 2, 
+                        backgroundColor: theme.accentBlue + '33',
+                        fill: true,
+                        pointRadius: 3,
+                        yAxisID: 'y'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
+                    y: { title: { display: true, text: 'Value of Shares Outstanding (M$)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
+                    // y: { position: 'left', title: { display: true, text: 'Shares Outstanding (M)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true },
+                    // 'y-right': { position: 'right', title: { display: true, text: 'Shares Bought Back (M)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: false }, beginAtZero: true }
+                },
+                plugins: {
+                    title: { display: true, text: 'Value of Shares Outstanding (M$)', color: theme.foreground },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}M`; 
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
+                    },
+                    legend: { labels: { color: theme.foreground } }
+                }
+            }
+        });
+
+        const sharesBoughtBackCtx = document.getElementById('sharesBoughtBackChart').getContext('2d');
+        const sharesBoughtBackChart = new Chart(sharesBoughtBackCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { 
+                        label: 'Shares Bought Back (Millions)', 
+                        data: finSharesBoughtBackData, 
+                        borderColor: theme.accentOrange, 
+                        borderWidth: 2, 
+                        backgroundColor: theme.accentOrange + '33',
+                        fill: true,
+                        pointRadius: 3 
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
+                    y: { title: { display: true, text: 'Millions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
+                },
+                plugins: {
+                    title: { display: true, text: 'Shares Bought Back', color: theme.foreground },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}M`; 
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
+                    },
+                    legend: { labels: { color: theme.foreground } }
+                }
+            }
+        });
+
+        charts.push(debtChart);
+        
+        // Market Mechanics charts are handled differently since they're in a container
+        const marketMechanicsCharts = [marketCapChart, floatChart, sharesOutstandingChart, sharesBoughtBackChart];
+
+        // Date Range Handling (for Price + Volume only)
         const dateRangeSelector = document.getElementById('dateRange');
         dateRangeSelector.addEventListener('change', function() {
             const selectedRange = this.value;
             currentData = filterDataByRange(selectedRange);
-            
             if (priceVolumeChart) {
                 priceVolumeChart.data.labels = currentData.labels;
                 priceVolumeChart.data.datasets[0].data = currentData.priceData;
-                priceVolumeChart.data.datasets[1].data = currentData.volumeData;
-                priceVolumeChart.data.datasets[2].data = currentData.volume7MAData;
-                priceVolumeChart.data.datasets[3].data = currentData.volume90MAData;
-                
-                const maxVolume = Math.max(...currentData.volumeData);
-                priceVolumeChart.options.scales['y-volume'].max = maxVolume * 5;
+                priceVolumeChart.data.datasets[1].data = currentData.price20MAData;
+                priceVolumeChart.data.datasets[2].data = currentData.price50MAData;
+                priceVolumeChart.data.datasets[3].data = currentData.price200MAData;
+                priceVolumeChart.data.datasets[4].data = currentData.volumeData;
+                priceVolumeChart.options.scales['y-volume'].max = Math.max(...currentData.volumeData) * 5;
                 priceVolumeChart.options.scales['y-price'].suggestedMin = Math.min(...currentData.priceData) * 0.9;
                 priceVolumeChart.options.scales['y-price'].suggestedMax = Math.max(...currentData.priceData) * 1.1;
-                
                 priceVolumeChart.update();
             }
         });
 
+        // Chart Switching Logic
         let activeChartIndex = 0;
-        const chartCanvases = document.querySelectorAll('.chart-wrapper > canvas');
+        const chartElements = [
+            document.getElementById('priceVolumeChart'),
+            document.getElementById('earningsChart'),
+            document.getElementById('debtChart'),
+            document.getElementById('marketMechanicsContainer')
+        ];
         const controlsBar = document.querySelector('.controls-bar');
         const prevButton = document.getElementById('prevChart');
         const nextButton = document.getElementById('nextChart');
         const tabs = document.querySelectorAll('.tab');
 
         function updateChartVisibility() {
-            chartCanvases.forEach((canvas, index) => {
-                if (index === activeChartIndex) {
-                    canvas.classList.add('active');
-                    canvas.classList.remove('hidden');
-                } else {
-                    canvas.classList.add('hidden');
-                    canvas.classList.remove('active');
-                }
+            chartElements.forEach((element, index) => {
+                element.classList.toggle('active', index === activeChartIndex);
+                element.classList.toggle('hidden', index !== activeChartIndex);
             });
-
-            tabs.forEach((tab, index) => {
-                if (index === activeChartIndex) {
-                    tab.classList.add('active');
-                } else {
-                    tab.classList.remove('active');
-                }
-            });
-
-            if (activeChartIndex === 0) {
-                controlsBar.classList.add('active');
-                if (priceVolumeChart) {
-                    priceVolumeChart.resize();
-                }
+            tabs.forEach((tab, index) => tab.classList.toggle('active', index === activeChartIndex));
+            controlsBar.classList.toggle('active', activeChartIndex === 0);
+            
+            // Update visible charts
+            if (activeChartIndex < 3) {
+                if (charts[activeChartIndex]) charts[activeChartIndex].resize();
             } else {
-                controlsBar.classList.remove('active');
+                // For Market Mechanics, resize all sub-charts
+                marketMechanicsCharts.forEach(chart => chart.resize());
             }
         }
 
@@ -521,36 +806,32 @@
 
         document.addEventListener('keydown', function(event) {
             if (event.key === 'ArrowRight') {
-                activeChartIndex = (activeChartIndex + 1) % chartCanvases.length;
+                activeChartIndex = (activeChartIndex + 1) % chartElements.length;
                 updateChartVisibility();
             } else if (event.key === 'ArrowLeft') {
-                activeChartIndex = (activeChartIndex - 1 + chartCanvases.length) % chartCanvases.length;
+                activeChartIndex = (activeChartIndex - 1 + chartElements.length) % chartElements.length;
                 updateChartVisibility();
             }
         });
 
         nextButton.addEventListener('click', function() {
-            activeChartIndex = (activeChartIndex + 1) % chartCanvases.length;
+            activeChartIndex = (activeChartIndex + 1) % chartElements.length;
             updateChartVisibility();
         });
 
         prevButton.addEventListener('click', function() {
-            activeChartIndex = (activeChartIndex - 1 + chartCanvases.length) % chartCanvases.length;
+            activeChartIndex = (activeChartIndex - 1 + chartElements.length) % chartElements.length;
             updateChartVisibility();
         });
 
         const toggleLogScaleButton = document.getElementById('toggleLogScale');
-        if (toggleLogScaleButton) {
-            toggleLogScaleButton.addEventListener('click', function() {
-                if (priceVolumeChart) {
-                    const yAxis = priceVolumeChart.options.scales['y-price'];
-                    yAxis.type = yAxis.type === 'logarithmic' ? 'linear' : 'logarithmic';
-                    priceVolumeChart.update();
-                } else {
-                    console.error('priceVolumeChart is not defined.');
-                }
-            });
-        }
+        toggleLogScaleButton.addEventListener('click', function() {
+            if (priceVolumeChart) {
+                const yAxis = priceVolumeChart.options.scales['y-price'];
+                yAxis.type = yAxis.type === 'logarithmic' ? 'linear' : 'logarithmic';
+                priceVolumeChart.update();
+            }
+        });
     </script>
 </body>
 </html>
