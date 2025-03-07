@@ -78,52 +78,6 @@ pub struct StdFins {
     pub dividend_payout: Option<f64>,
 }
 
-/// Backend for an individual stock's dashboard.
-// #[get("/asset/{symbol}")]
-// pub async fn stock_dashboard(
-//     symbol: web::Path<String>,
-//     pool: web::Data<sqlx::PgPool>,
-//     tera: web::Data<Tera>,
-// ) -> impl Responder {
-//     let symbol = symbol.into_inner();
-
-//     match sqlx::query_as::<_, Price>(
-//         "
-//         SELECT
-//             dt::DATE AS date,
-//             perc,
-//             adj_close,
-//             adj_close_20ma,
-//             adj_close_50ma,
-//             adj_close_200ma,
-//             volume,
-//             volume_7ma,
-//             volume_90ma
-//         FROM stock.prices_matv
-//         WHERE symbol = $1
-//         ORDER BY date DESC
-//     ",
-//     )
-//     .bind(&symbol)
-//     .fetch_all(pool.get_ref())
-//     .await
-//     {
-//         Ok(prices) => {
-//             let mut context = Context::new();
-//             let prices_json = serde_json::to_string(&prices).expect("failed to serialize prices");
-//             context.insert("prices", &prices_json);
-//             // context.insert("prices", &prices);
-//             let rendered = tera
-//                 .render("stock_dashboard.html", &context)
-//                 .expect("failed to render stock_dashboard");
-//             HttpResponse::Ok().content_type("text/html").body(rendered)
-//         }
-//         Err(e) => {
-//             tracing::error!("{e}");
-//             HttpResponse::InternalServerError().body("Failed to fetch stock data")
-//         }
-//     }
-
 #[get("/asset/{symbol}")]
 pub async fn stock_dashboard(
     symbol: web::Path<String>,
@@ -133,9 +87,19 @@ pub async fn stock_dashboard(
     let symbol = symbol.into_inner();
 
     match sqlx::query(
-        "
+        r#"
         SELECT 
             json_build_object(
+                'symbols', (
+                    SELECT json_agg(
+                        json_build_object(
+                            'symbol', symbol,
+                            'title', REGEXP_REPLACE(title, '[''\\\/]', '', 'g'),
+                            'industry', REGEXP_REPLACE(industry, '[''\\\/]', '', 'g')  
+                        )
+                    )
+                    FROM stock.symbols
+                ),
                 'prices', (
                     SELECT json_agg(
                         json_build_object(
@@ -168,8 +132,10 @@ pub async fn stock_dashboard(
                             'accumulated_earnings', accumulated_earnings,
                             'debt', debt,
                             'equity', equity,
+                            'return_on_equity', return_on_equity,
                             'debt_to_equity', debt_to_equity,
                             'assets', assets,
+                            'return_on_assets', return_on_assets,
                             'market_cap', market_cap,
                             'shares_outstanding', shares_outstanding,
                             'float', float,
@@ -182,7 +148,7 @@ pub async fn stock_dashboard(
                     WHERE sy.symbol = $1
                 )
             ) as combined_data
-        ",
+        "#,
     )
     .bind(&symbol)
     .fetch_one(pool.get_ref())
@@ -192,6 +158,10 @@ pub async fn stock_dashboard(
             let combined_data: serde_json::Value = row.get("combined_data");
 
             let mut context = Context::new();
+
+            let symbols_json = serde_json::to_string(&combined_data["symbols"])
+                .expect("Failed to serialize symbols to JSON");
+            context.insert("symbols", &symbols_json);
 
             let prices_json = serde_json::to_string(&combined_data["prices"])
                 .expect("Failed to serialize prices to JSON");
@@ -212,56 +182,3 @@ pub async fn stock_dashboard(
         }
     }
 }
-
-// match sqlx::query_as::<_, StdFins>("
-//     SELECT
-//         end_date,
-//         price,
-//         shares_outstanding,
-//         market_cap,
-//         revenue,
-//         gross_profit,
-//         operating_income,
-//         earnings,
-//         earnings_perc,
-//         avg_shares,
-//         eps,
-//         accumulated_earnings,
-//         debt,
-//         equity,
-//         debt_to_equity,
-//         assets,
-//         float,
-//         value_of_shares_bought_back,
-//         dividend_payout
-//     FROM stock.std_financials std
-//     INNER JOIN stock.symbols sy
-//         ON sy.pk = std.symbol_pk
-//     WHERE sy.symbol = $1
-// ",
-// )
-// .bind(&symbol)
-// .fetch_all(pool.get_ref())
-// .await
-// {
-//     Ok(fin) => {
-//         let mut context = Context::new();
-//         let fin_json = serde_json::to_string(&fin).expect("failed to serialize prices");
-//         context.insert("revenue", &fin_json["revenue"]);
-//         context.insert("earnings", &fin_json["earnings"]);
-//         context.insert("earnings_perc", &fin_json["earnings_perc"]);
-//         context.insert("eps", &fin_json["eps"]);
-//         context.insert("gross_profit", &fin_json["gross_profit"]);
-//         context.insert("operating_income", &fin_json["operating_income"]);
-//         context.insert("accumulated_earnings", &fin_json["accumulated_earnings"]);
-//         let rendered = tera
-//             .render("stock_dashboard.html", &context)
-//             .expect("failed to render stock_dashboard");
-//         HttpResponse::Ok().content_type("text/html").body(rendered)
-//     }
-//     Err(e) => {
-//         tracing::error!("{e}");
-//         HttpResponse::InternalServerError().body("Failed to fetch stock data")
-//     }
-// }
-// }

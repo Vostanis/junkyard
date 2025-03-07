@@ -25,7 +25,33 @@
             border-bottom: 1px solid var(--text-muted);
             display: flex;
             justify-content: center;
+            align-items: center;
+            position: relative;
         }
+        
+        /* Home button styles */
+        .home-button {
+            position: absolute;
+            left: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background-color: var(--background, #bcb28d);
+            color: var(--foreground, #1f2023);
+            border-radius: 4px;
+            border: 1px double;
+            cursor: pointer;
+            font-size: 18px;
+            transition: background-color 0.3s ease;
+            text-decoration: none;
+        }
+        
+        .home-button:hover {
+            background-color: var(--accent-blue, #58b2dc);
+        }
+        
         #searchInput {
             width: 50%;
             padding: 8px 12px;
@@ -45,6 +71,67 @@
             border-color: var(--accent-blue);
             box-shadow: 0 0 5px var(--accent-blue);
         }
+        
+        /* Search results dropdown */
+        .search-results {
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 50%;
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: var(--graph-bg);
+            border: 1px solid var(--text-muted);
+            border-radius: 4px;
+            z-index: 1000;
+            display: none;
+            margin-top: 5px;
+        }
+        
+        .search-results.visible {
+            display: block;
+        }
+        
+        .search-results ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .search-results li {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--text-muted);
+            transition: background-color 0.2s ease;
+        }
+        
+        .search-results li:last-child {
+            border-bottom: none;
+        }
+        
+        .search-results li.label {
+            background-color: var(--text-muted);
+            color: var(--background);
+            font-weight: bold;
+            cursor: default;
+        }
+        
+        .search-results li:not(.label):hover, 
+        .search-results li.highlighted {
+            background-color: var(--accent-blue);
+            color: var(--background);
+        }
+        
+        .search-results li strong {
+            color: var(--accent-magenta);
+        }
+        
+        .search-results li weak {
+            opacity: 0.7;
+            font-size: 0.9em;
+        }
+        
         .tab-bar {
             display: flex;
             justify-content: center;
@@ -72,7 +159,7 @@
         }
         .chart-container {
             width: 100%;
-            height: calc(100vh - 70px); /* Adjusted for search bar + tab bar + controls */
+            height: calc(100vh - 70px);
             padding: 0 20px;
             box-sizing: border-box;
             position: relative;
@@ -110,7 +197,7 @@
             justify-content: center;
             align-items: center;
             gap: 20px;
-            visibility: hidden; /* Hidden by default, shown only for Price + Volume */
+            visibility: hidden;
         }
         .controls-bar.active {
             visibility: visible;
@@ -182,11 +269,16 @@
             background: var(--accent-magenta);
             color: var(--background);
         }
+        
+        /* Market Mechanics tab styling */
         .split-chart-container {
             display: flex;
             flex-wrap: wrap;
             width: 100%;
             height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
         }
         .chart-half {
             width: 50%;
@@ -195,11 +287,61 @@
             padding: 10px;
             box-sizing: border-box;
         }
+        .chart-half canvas {
+            position: relative !important;
+            width: 100% !important;
+            height: 100% !important;
+        }
+        .chart-wrapper-quad {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        /* Earnings tab styling */
+        .split-earnings-container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .chart-left {
+            width: 67%;
+            height: 100%;
+            position: relative;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        .chart-left canvas {
+            position: relative !important;
+        }
+        .chart-right {
+            width: 33%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        .chart-top, .chart-bottom {
+            height: 50%;
+            position: relative;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        .chart-top canvas, .chart-bottom canvas {
+            position: relative !important;
+        }
     </style>
 </head>
 <body>
     <div class="search-bar">
-        <input type="text" id="searchInput" placeholder="Search stocks..." />
+        <a href="/home" class="home-button">⌂</a>
+        <input type="text" id="searchInput" placeholder="Search stocks..." autocomplete="off" />
+        <div class="search-results" id="searchResults">
+            <ul id="resultsList"></ul>
+        </div>
     </div>
     <div class="tab-bar">
         <button class="tab active" data-chart-index="0">Price & Volume</button>
@@ -212,20 +354,45 @@
             <button class="arrow-button" id="prevChart">←</button>
             <div class="chart-wrapper">
                 <canvas id="priceVolumeChart" class="active"></canvas>
-                <canvas id="earningsChart" class="hidden"></canvas>
+                
+                <!-- Modified earnings container with 75-25 split -->
+                <div id="earningsContainer" class="hidden split-earnings-container">
+                    <div class="chart-left">
+                        <canvas id="earningsChart"></canvas>
+                    </div>
+                    <div class="chart-right">
+                        <div class="chart-top">
+                            <canvas id="operatingProfitChart"></canvas>
+                        </div>
+                        <div class="chart-bottom">
+                            <canvas id="epsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
                 <canvas id="debtChart" class="hidden"></canvas>
+                
+                <!-- Fixed Market Mechanics container -->
                 <div id="marketMechanicsContainer" class="hidden split-chart-container">
                     <div class="chart-half">
-                        <canvas id="marketCapChart"></canvas>
+                        <div class="chart-wrapper-quad">
+                            <canvas id="marketCapChart"></canvas>
+                        </div>
                     </div>
                     <div class="chart-half">
-                        <canvas id="sharesOutstandingChart"></canvas>
+                        <div class="chart-wrapper-quad">
+                            <canvas id="sharesOutstandingChart"></canvas>
+                        </div>
                     </div>
                     <div class="chart-half">
-                        <canvas id="floatChart"></canvas>
+                        <div class="chart-wrapper-quad">
+                            <canvas id="floatChart"></canvas>
+                        </div>
                     </div>
                     <div class="chart-half">
-                        <canvas id="sharesBoughtBackChart"></canvas>
+                        <div class="chart-wrapper-quad">
+                            <canvas id="sharesBoughtBackChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -246,13 +413,211 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.2/dist/chartjs-plugin-annotation.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
     <script>
         console.log('Chart.js loaded:', typeof Chart !== 'undefined');
         console.log('Annotation plugin loaded:', typeof Chart.Annotation !== 'undefined');
+        console.log('Fuse.js loaded:', typeof Fuse !== 'undefined');
 
         let prices;
         let financials;
+        
+        // Sample stock data for fuzzy search
+        const stockData = [
+            { symbol: 'AAPL', title: 'Apple Inc.', industry: 'Technology' },
+            { symbol: 'MSFT', title: 'Microsoft Corporation', industry: 'Technology' },
+            { symbol: 'AMZN', title: 'Amazon.com Inc.', industry: 'Consumer Retail' },
+            { symbol: 'GOOGL', title: 'Alphabet Inc.', industry: 'Technology' },
+            { symbol: 'META', title: 'Meta Platforms Inc.', industry: 'Technology' },
+            { symbol: 'TSLA', title: 'Tesla Inc.', industry: 'Automotive' },
+            { symbol: 'NVDA', title: 'NVIDIA Corporation', industry: 'Technology' },
+            { symbol: 'JPM', title: 'JPMorgan Chase & Co.', industry: 'Financial Services' },
+            { symbol: 'V', title: 'Visa Inc.', industry: 'Financial Services' },
+            { symbol: 'JNJ', title: 'Johnson & Johnson', industry: 'Healthcare' },
+            { symbol: 'PG', title: 'Procter & Gamble Co.', industry: 'Consumer Goods' },
+            { symbol: 'HD', title: 'Home Depot Inc.', industry: 'Retail' },
+            { symbol: 'BAC', title: 'Bank of America Corp.', industry: 'Financial Services' },
+            { symbol: 'MA', title: 'Mastercard Inc.', industry: 'Financial Services' },
+            { symbol: 'DIS', title: 'Walt Disney Co.', industry: 'Entertainment' }
+        ];
+        
+        // Initialize Fuse.js for fuzzy search
+        const fuseOptions = {
+            includeScore: true,
+            includeMatches: true,
+            threshold: 0.3,
+            keys: ['symbol', 'title', 'industry'],
+            location: 0,
+            distance: 100,
+            minMatchCharLength: 1,
+            shouldSort: true,
+            findAllMatches: true
+        };
+        const fuse = new Fuse(stockData, fuseOptions);
+        
+        // Fuzzy search implementation
+        const searchInput = document.getElementById('searchInput');
+        const searchResults = document.getElementById('searchResults');
+        const resultsList = document.getElementById('resultsList');
+        
+        let currentIndex = -1;
+        let selectedItem = null;
+        
+        searchInput.addEventListener('input', performSearch);
+        searchInput.addEventListener('keydown', handleKeyNavigation);
+        
+        // Hide search results when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.classList.remove('visible');
+                currentIndex = -1;
+                selectedItem = null;
+            }
+        });
+        
+        function performSearch() {
+            const query = searchInput.value.trim();
+            
+            if (!query) {
+                searchResults.classList.remove('visible');
+                resultsList.innerHTML = '';
+                currentIndex = -1;
+                selectedItem = null;
+                return;
+            }
+            
+            const results = fuse.search(query);
+            
+            if (results.length === 0) {
+                resultsList.innerHTML = '<li>No matches found</li>';
+            } else {
+                resultsList.innerHTML = '<li class="label">Search Results</li>';
+                
+                results.slice(0, 10).forEach((result) => {
+                    const el = document.createElement('li');
+                    
+                    // Highlight matching parts if available
+                    let displaySymbol = result.item.symbol;
+                    let displayTitle = result.item.title;
+                    let displayIndustry = result.item.industry || '';
+                    
+                    if (result.matches) {
+                        // Apply highlighting to matched parts
+                        result.matches.forEach(match => {
+                            if (match.key === 'symbol') {
+                                displaySymbol = highlightMatches(result.item.symbol, match.indices);
+                            } else if (match.key === 'title') {
+                                displayTitle = highlightMatches(result.item.title, match.indices);
+                            } else if (match.key === 'industry' && result.item.industry) {
+                                displayIndustry = highlightMatches(result.item.industry, match.indices);
+                            }
+                        });
+                    }
+                    
+                    el.innerHTML = `
+                        <strong>[${displaySymbol}]</strong> ${displayTitle} <weak>${displayIndustry}</weak>
+                    `;
+                    
+                    el.dataset.symbol = result.item.symbol;
+                    
+                    el.addEventListener('click', () => {
+                        handleStockSelection(result.item.symbol);
+                    });
+                    
+                    resultsList.appendChild(el);
+                });
+            }
+            
+            searchResults.classList.add('visible');
+            currentIndex = -1;
+        }
+        
+        function highlightMatches(text, indices) {
+            if (!indices || indices.length === 0) return text;
+            
+            const chars = text.split('');
+            // Create a map of positions to highlight
+            const positions = new Set();
+            indices.forEach(([start, end]) => {
+                for (let i = start; i <= end; i++) {
+                    positions.add(i);
+                }
+            });
+            
+            // Apply highlighting
+            let result = '';
+            chars.forEach((char, index) => {
+                if (positions.has(index)) {
+                    result += `<span style="color: var(--accent-blue, #58b2dc); font-weight: bold;">${char}</span>`;
+                } else {
+                    result += char;
+                }
+            });
+            
+            return result;
+        }
+        
+        function handleKeyNavigation(e) {
+            const items = Array.from(resultsList.querySelectorAll("li:not(.label)"));
+            
+            if (items.length === 0) return;
+            
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                currentIndex++;
+                if (currentIndex >= items.length) currentIndex = 0;
+                updateHighlight(items);
+                selectedItem = items[currentIndex];
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                currentIndex--;
+                if (currentIndex < 0) currentIndex = items.length - 1;
+                updateHighlight(items);
+                selectedItem = items[currentIndex];
+            } else if (e.key === "Enter") {
+                if (currentIndex >= 0 && selectedItem) {
+                    e.preventDefault();
+                    const symbol = selectedItem.dataset.symbol;
+                    handleStockSelection(symbol);
+                }
+            } else if (e.key === "Escape") {
+                searchResults.classList.remove('visible');
+                currentIndex = -1;
+                selectedItem = null;
+            }
+        }
+        
+        function updateHighlight(items) {
+            items.forEach((item, index) => {
+                item.classList.toggle('highlighted', index === currentIndex);
+                if (index === currentIndex) {
+                    item.scrollIntoView({ block: "nearest" });
+                }
+            });
+        }
+        
+        function handleStockSelection(symbol) {
+            searchInput.value = symbol;
+            searchResults.classList.remove('visible');
+            // Here you would load data for the selected stock
+            console.log(`Selected stock: ${symbol}`);
+            // For demonstration, you could navigate to the asset page
+            // window.location.href = `/asset/${symbol}`;
+            // Or just update the current view with the selected stock data
+            // loadStockData(symbol);
+        }
+        
+        // Keyboard shortcut for search bar focus
+        document.addEventListener('keydown', function(e) {
+            if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+                e.preventDefault();
+                searchInput.focus();
+            }
+        });
+
         try {
+            const symbols_json = '{{ symbols | safe }}';
+            symbols = JSON.parse(symbols_json);
             const prices_json = '{{ prices | safe }}';
             prices = JSON.parse(prices_json);
             const fin_json = '{{ financials | safe }}';
@@ -267,12 +632,12 @@
                 { date: '2025-02-01', adj_close: 280.00, adj_close_20ma: 260.00, adj_close_50ma: 240.00, adj_close_200ma: 200.00, volume: 150000000 }
             ];
             financials = [
-                { end_date: '2024-10-18', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 110000000000, equity: 58000000000, assets: 168000000000, market_cap: 450000000000, shares_outstanding: 13500000000, float: 10000000000, value_of_shares_bought_back: 500000000 },
-                { end_date: '2024-09-28', accumulated_earnings: -19154000000, debt_to_equity: 1.872326602282704, earnings: null, earnings_perc: 0, revenue: null, debt: 108000000000, equity: 57000000000, assets: 165000000000, market_cap: 420000000000, shares_outstanding: 13600000000, float: 10100000000, value_of_shares_bought_back: 450000000 },
-                { end_date: '2024-07-19', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 106000000000, equity: 55000000000, assets: 161000000000, market_cap: 410000000000, shares_outstanding: 13700000000, float: 10200000000, value_of_shares_bought_back: 400000000 },
-                { end_date: '2024-06-29', accumulated_earnings: -4726000000, debt_to_equity: 1.5186184565569347, earnings: 21448000000, earnings_perc: 0.25004371801298714, revenue: 85783000000, debt: 104000000000, equity: 52000000000, assets: 156000000000, market_cap: 400000000000, shares_outstanding: 13800000000, float: 10300000000, value_of_shares_bought_back: 350000000 },
-                { end_date: '2024-04-19', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 102000000000, equity: 50000000000, assets: 152000000000, market_cap: 390000000000, shares_outstanding: 14000000000, float: 10400000000, value_of_shares_bought_back: 300000000 },
-                { end_date: '2024-03-30', accumulated_earnings: 4339000000, debt_to_equity: 1.4096827236703777, earnings: 23636000000, earnings_perc: 0.26044318094167684, revenue: 90753000000, debt: 100000000000, equity: 48000000000, assets: 148000000000, market_cap: 380000000000, shares_outstanding: 14500000000, float: 10500000000, value_of_shares_bought_back: 200000000 }
+                { end_date: '2024-10-18', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 110000000000, equity: 58000000000, assets: 168000000000, market_cap: 450000000000, shares_outstanding: 13500000000, float: 10000000000, value_of_shares_bought_back: 500000000, gross_profit: 35000000000, operating_income: 24000000000, eps: 1.58 },
+                { end_date: '2024-09-28', accumulated_earnings: -19154000000, debt_to_equity: 1.872326602282704, earnings: null, earnings_perc: 0, revenue: null, debt: 108000000000, equity: 57000000000, assets: 165000000000, market_cap: 420000000000, shares_outstanding: 13600000000, float: 10100000000, value_of_shares_bought_back: 450000000, gross_profit: 34000000000, operating_income: 23000000000, eps: 1.52 },
+                { end_date: '2024-07-19', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 106000000000, equity: 55000000000, assets: 161000000000, market_cap: 410000000000, shares_outstanding: 13700000000, float: 10200000000, value_of_shares_bought_back: 400000000, gross_profit: 33000000000, operating_income: 22500000000, eps: 1.49 },
+                { end_date: '2024-06-29', accumulated_earnings: -4726000000, debt_to_equity: 1.5186184565569347, earnings: 21448000000, earnings_perc: 0.25004371801298714, revenue: 85783000000, debt: 104000000000, equity: 52000000000, assets: 156000000000, market_cap: 400000000000, shares_outstanding: 13800000000, float: 10300000000, value_of_shares_bought_back: 350000000, gross_profit: 31500000000, operating_income: 22000000000, eps: 1.46 },
+                { end_date: '2024-04-19', accumulated_earnings: null, debt_to_equity: 0, earnings: null, earnings_perc: 0, revenue: null, debt: 102000000000, equity: 50000000000, assets: 152000000000, market_cap: 390000000000, shares_outstanding: 14000000000, float: 10400000000, value_of_shares_bought_back: 300000000, gross_profit: 31000000000, operating_income: 21500000000, eps: 1.42 },
+                { end_date: '2024-03-30', accumulated_earnings: 4339000000, debt_to_equity: 1.4096827236703777, earnings: 23636000000, earnings_perc: 0.26044318094167684, revenue: 90753000000, debt: 100000000000, equity: 48000000000, assets: 148000000000, market_cap: 380000000000, shares_outstanding: 14500000000, float: 10500000000, value_of_shares_bought_back: 200000000, gross_profit: 32000000000, operating_income: 22300000000, eps: 1.56 }
             ];
             console.log('Using fallback data:', { prices, financials });
         }
@@ -329,6 +694,8 @@
         const rawFinAccumulatedEarningsData = financials.map(item => item.accumulated_earnings ? item.accumulated_earnings / 1e9 : null).reverse();
         const rawFinDebtToEquityData = financials.map(item => item.debt_to_equity || null).reverse();
         const rawFinEarningsPercData = financials.map(item => item.earnings_perc * 100 || null).reverse();
+        const rawFinReturnOnAssets = financials.map(item => item.return_on_assets * 100 || null).reverse();
+        const rawFinReturnOnEquity = financials.map(item => item.return_on_equity * 100 || null).reverse();
         
         // New data for Debt & Equity tab
         const rawFinDebtData = financials.map(item => item.debt ? item.debt / 1e9 : null).reverse();
@@ -340,6 +707,11 @@
         const rawFinSharesOutstandingData = financials.map(item => item.shares_outstanding ? item.shares_outstanding / 1e6 : null).reverse();
         const rawFinFloatData = financials.map(item => item.float ? item.float / 1e6 : null).reverse();
         const rawFinSharesBoughtBackData = financials.map(item => item.value_of_shares_bought_back ? item.value_of_shares_bought_back / 1e6 : null).reverse();
+        
+        // New data for the earnings right panels
+        const rawFinGrossProfitData = financials.map(item => item.gross_profit ? item.gross_profit / 1e9 : null).reverse();
+        const rawFinOperatingIncomeData = financials.map(item => item.operating_income ? item.operating_income / 1e9 : null).reverse();
+        const rawFinEPSData = financials.map(item => item.eps ? item.eps : null).reverse();
 
         const finRevenueData = interpolateData(rawFinRevenueData);
         const finEarningsData = interpolateData(rawFinEarningsData);
@@ -357,6 +729,11 @@
         const finSharesOutstandingData = interpolateData(rawFinSharesOutstandingData);
         const finFloatData = interpolateData(rawFinFloatData);
         const finSharesBoughtBackData = interpolateData(rawFinSharesBoughtBackData);
+        
+        // Interpolated data for the earnings right panels
+        const finGrossProfitData = interpolateData(rawFinGrossProfitData);
+        const finOperatingIncomeData = interpolateData(rawFinOperatingIncomeData);
+        const finEPSData = interpolateData(rawFinEPSData);
 
         function filterDataByRange(range) {
             const now = new Date('2025-02-27');
@@ -432,10 +809,9 @@
             data: {
                 labels: finLabels,
                 datasets: [
-                    { label: 'Revenue (Billions)', data: finRevenueData, borderColor: theme.accentBlue, borderWidth: 2, fill: false, pointRadius: 2 },
-                    { label: 'Earnings (Billions)', data: finEarningsData, borderColor: theme.accentMagenta, borderWidth: 2, fill: false, pointRadius: 2 },
-                    { label: 'Accumulated Earnings (Billions)', data: finAccumulatedEarningsData, borderColor: theme.textMuted, borderWidth: 2, fill: false, pointRadius: 2 },
-                    // { label: 'Earnings % (x100)', data: finEarningsPercData, borderColor: theme.foreground, borderWidth: 2, fill: false, pointRadius: 3, yAxisID: 'y-perc' }
+                    { label: 'Revenue (Billions)', data: finRevenueData, borderColor: theme.accentBlue, borderWidth: 1, fill: false, pointRadius: 1 },
+                    { label: 'Earnings (Billions)', data: finEarningsData, borderColor: theme.accentMagenta, backgroundColor: theme.accentMagenta + '33', borderWidth: 1, fill: true, pointRadius: 1 },
+                    { label: 'Accumulated Earnings (Billions)', data: finAccumulatedEarningsData, borderColor: theme.textMuted, borderWidth: 1, fill: false, pointRadius: 1 }
                 ]
             },
             options: {
@@ -444,7 +820,6 @@
                 scales: {
                     x: { type: 'category', title: { display: true, text: 'End Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { display: true, color: theme.textMuted + '33' } },
                     y: { title: { display: true, text: 'Billions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: true, color: theme.textMuted + '33' } }
-                    // 'y-perc': { position: 'right', title: { display: true, text: 'Earnings %', color: theme.foreground }, ticks: { color: theme.textMuted, callback: value => value + '%' }, grid: { display: false }, beginAtZero: true }
                 },
                 plugins: {
                     title: { display: true, text: 'Earnings Metrics', color: theme.foreground },
@@ -488,6 +863,209 @@
             }
         });
         charts.push(earningsChart);
+        
+        // Operating Income & Gross Profit Chart
+        const operatingProfitCtx = document.getElementById('operatingProfitChart').getContext('2d');
+        const operatingProfitChart = new Chart(operatingProfitCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { 
+                        label: 'Gross Profit (B)', 
+                        data: finGrossProfitData, 
+                        borderColor: theme.accentOrange, 
+                        borderWidth: 0.5, 
+                        fill: false, 
+                        pointRadius: 0.5 
+                    },
+                    { 
+                        label: 'Operating Income (B)', 
+                        data: finOperatingIncomeData, 
+                        borderColor: theme.accentBlue, 
+                        backgroundColor: theme.accentBlue + '33',
+                        borderWidth: 0.5, 
+                        fill: true, 
+                        pointRadius: 0.5 
+                    },
+                    { 
+                        label: 'Net Income/Earnings (B)', 
+                        data: finEarningsData, 
+                        borderColor: theme.accentMagenta, 
+                        borderWidth: 0.5, 
+                        fill: false, 
+                        pointRadius: 0.5,
+                        hidden: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { 
+                        type: 'category', 
+                        ticks: { 
+                            color: theme.textMuted, 
+                            maxRotation: 45, 
+                            minRotation: 45,
+                            autoSkip: true,
+                            maxTicksLimit: 5
+                        }, 
+                        grid: { 
+                            display: true, 
+                            color: theme.textMuted + '33' 
+                        },
+                        display: true 
+                    },
+                    y: { 
+                        title: { 
+                            display: true, 
+                            text: 'Billions', 
+                            color: theme.foreground 
+                        }, 
+                        ticks: { 
+                            color: theme.textMuted 
+                        }, 
+                        grid: { 
+                            color: theme.textMuted + '33' 
+                        }, 
+                        beginAtZero: true 
+                    }
+                },
+                plugins: {
+                    title: { 
+                        display: true, 
+                        text: 'Operating Metrics', 
+                        color: theme.foreground,
+                        font: { size: 12 }
+                    },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}B`; 
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
+                    },
+                    legend: { 
+                        labels: { 
+                            color: theme.foreground,
+                            font: { size: 10 }
+                        },
+                        position: 'top'
+                    },
+                    annotation: {
+                        annotations: {
+                            zeroLine: {
+                                type: 'line',
+                                yMin: 0,
+                                yMax: 0,
+                                borderColor: theme.textMuted,
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                label: {
+                                    enabled: true,
+                                    content: 'Y=0',
+                                    position: 'start',
+                                    backgroundColor: theme.graphBg,
+                                    color: theme.foreground,
+                                    font: { size: 12 }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // EPS Chart
+        const epsCtx = document.getElementById('epsChart').getContext('2d');
+        const epsChart = new Chart(epsCtx, {
+            type: 'line',
+            data: {
+                labels: finLabels,
+                datasets: [
+                    { 
+                        label: 'EPS ($)', 
+                        data: finEPSData, 
+                        borderColor: theme.accentBlue, 
+                        borderWidth: 1, 
+                        backgroundColor: theme.accentBlue + '33',
+                        fill: true,
+                        pointRadius: 1 
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { 
+                        type: 'category', 
+                        ticks: { 
+                            color: theme.textMuted, 
+                            maxRotation: 45, 
+                            minRotation: 45,
+                            autoSkip: true,
+                            maxTicksLimit: 5 
+                        }, 
+                        grid: { 
+                            display: true, 
+                            color: theme.textMuted + '33' 
+                        },
+                        display: true
+                    },
+                    y: { 
+                        title: { 
+                            display: true, 
+                            text: 'EPS ($)', 
+                            color: theme.foreground 
+                        }, 
+                        ticks: { 
+                            color: theme.textMuted 
+                        }, 
+                        grid: { 
+                            color: theme.textMuted + '33' 
+                        }
+                    }
+                },
+                plugins: {
+                    title: { 
+                        display: true, 
+                        text: 'Earnings Per Share', 
+                        color: theme.foreground,
+                        font: { size: 12 }
+                    },
+                    tooltip: { 
+                        mode: 'index', 
+                        intersect: false, 
+                        callbacks: { 
+                            label: function(context) { 
+                                return `${context.dataset.label}: $${context.parsed.y.toFixed(2)}`; 
+                            } 
+                        }, 
+                        backgroundColor: theme.graphBg, 
+                        bodyColor: theme.foreground, 
+                        titleColor: theme.foreground 
+                    },
+                    legend: { 
+                        labels: { 
+                            color: theme.foreground,
+                            font: { size: 10 }
+                        },
+                        position: 'top'
+                    }
+                }
+            }
+        });
+        
+        // Store references to the new earnings charts
+        const earningsCharts = [operatingProfitChart, epsChart];
 
         // Updated Debt & Equity Chart with filled areas
         const debtCtx = document.getElementById('debtChart').getContext('2d');
@@ -500,27 +1078,27 @@
                         label: 'Debt (Billions)', 
                         data: finDebtData, 
                         borderColor: theme.accentRed, 
-                        borderWidth: 2, 
+                        borderWidth: 1, 
                         backgroundColor: theme.accentRed + '33',
                         fill: true,
-                        pointRadius: 3 
+                        pointRadius: 1 
                     },
                     { 
                         label: 'Equity (Billions)', 
                         data: finEquityData, 
                         borderColor: theme.accentBlue, 
-                        borderWidth: 2, 
+                        borderWidth: 1, 
                         backgroundColor: theme.accentBlue + '33',
                         fill: true,
-                        pointRadius: 3 
+                        pointRadius: 1 
                     },
                     { 
                         label: 'Assets (Billions)', 
                         data: finAssetsData, 
                         borderColor: theme.accentOrange, 
-                        borderWidth: 2, 
+                        borderWidth: 1, 
                         fill: false,
-                        pointRadius: 3 
+                        pointRadius: 1 
                     }
                 ]
             },
@@ -576,10 +1154,10 @@
                         label: 'Market Cap (Billions)', 
                         data: finMarketCapData, 
                         borderColor: theme.accentMagenta, 
-                        borderWidth: 2, 
+                        borderWidth: 1, 
                         backgroundColor: theme.accentMagenta + '33',
                         fill: true,
-                        pointRadius: 3 
+                        pointRadius: 1
                     }
                 ]
             },
@@ -587,11 +1165,11 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
-                    y: { title: { display: true, text: 'Billions ($)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 4 }, grid: { display: true, color: theme.textMuted + '33' } },
+                    y: { title: { display: true, text: 'Billions ($)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: true, color: theme.textMuted + '33' }, beginAtZero: true }
                 },
                 plugins: {
-                    title: { display: true, text: 'Market Cap', color: theme.foreground },
+                    title: { display: true, text: 'Market Cap', color: theme.foreground, font: { size: 12 } },
                     tooltip: { 
                         mode: 'index', 
                         intersect: false, 
@@ -604,7 +1182,10 @@
                         bodyColor: theme.foreground, 
                         titleColor: theme.foreground 
                     },
-                    legend: { labels: { color: theme.foreground } }
+                    legend: { 
+                        labels: { color: theme.foreground, font: { size: 10 } },
+                        position: 'top'
+                    }
                 }
             }
         });
@@ -619,10 +1200,10 @@
                         label: 'Float (Millions)', 
                         data: finFloatData, 
                         borderColor: theme.accentRed, 
-                        borderWidth: 2, 
+                        borderWidth: 1, 
                         backgroundColor: theme.accentRed + '33',
                         fill: true,
-                        pointRadius: 3 
+                        pointRadius: 1
                     }
                 ]
             },
@@ -630,11 +1211,11 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
-                    y: { title: { display: true, text: 'Millions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 4 }, grid: { display: true, color: theme.textMuted + '33' } },
+                    y: { title: { display: true, text: 'Millions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: true, color: theme.textMuted + '33' }, beginAtZero: true }
                 },
                 plugins: {
-                    title: { display: true, text: 'Float', color: theme.foreground },
+                    title: { display: true, text: 'Float', color: theme.foreground, font: { size: 12 } },
                     tooltip: { 
                         mode: 'index', 
                         intersect: false, 
@@ -647,7 +1228,10 @@
                         bodyColor: theme.foreground, 
                         titleColor: theme.foreground 
                     },
-                    legend: { labels: { color: theme.foreground } }
+                    legend: { 
+                        labels: { color: theme.foreground, font: { size: 10 } },
+                        position: 'top'
+                    }
                 }
             }
         });
@@ -659,14 +1243,13 @@
                 labels: finLabels,
                 datasets: [
                     { 
-                        label: 'Shares Outstanding (Millions)', 
+                        label: 'Shares Outstanding (M)', 
                         data: finSharesOutstandingData, 
                         borderColor: theme.accentBlue, 
-                        borderWidth: 2, 
+                        borderWidth: 1, 
                         backgroundColor: theme.accentBlue + '33',
                         fill: true,
-                        pointRadius: 3,
-                        yAxisID: 'y'
+                        pointRadius: 1
                     }
                 ]
             },
@@ -674,13 +1257,11 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
-                    y: { title: { display: true, text: 'Value of Shares Outstanding (M$)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
-                    // y: { position: 'left', title: { display: true, text: 'Shares Outstanding (M)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true },
-                    // 'y-right': { position: 'right', title: { display: true, text: 'Shares Bought Back (M)', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: false }, beginAtZero: true }
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 4 }, grid: { display: true, color: theme.textMuted + '33' } },
+                    y: { title: { display: true, text: 'Millions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: true, color: theme.textMuted + '33' }, beginAtZero: true }
                 },
                 plugins: {
-                    title: { display: true, text: 'Value of Shares Outstanding (M$)', color: theme.foreground },
+                    title: { display: true, text: 'Shares Outstanding', color: theme.foreground, font: { size: 12 } },
                     tooltip: { 
                         mode: 'index', 
                         intersect: false, 
@@ -693,7 +1274,10 @@
                         bodyColor: theme.foreground, 
                         titleColor: theme.foreground 
                     },
-                    legend: { labels: { color: theme.foreground } }
+                    legend: { 
+                        labels: { color: theme.foreground, font: { size: 10 } },
+                        position: 'top'
+                    }
                 }
             }
         });
@@ -705,13 +1289,13 @@
                 labels: finLabels,
                 datasets: [
                     { 
-                        label: 'Shares Bought Back (Millions)', 
+                        label: 'Shares Bought Back (M$)', 
                         data: finSharesBoughtBackData, 
                         borderColor: theme.accentOrange, 
-                        borderWidth: 2, 
+                        borderWidth: 1, 
                         backgroundColor: theme.accentOrange + '33',
                         fill: true,
-                        pointRadius: 3 
+                        pointRadius: 1 
                     }
                 ]
             },
@@ -719,11 +1303,11 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45 }, grid: { color: theme.graphBg + '33' } },
-                    y: { title: { display: true, text: 'Millions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { color: theme.graphBg + '33' }, beginAtZero: true }
+                    x: { type: 'category', title: { display: true, text: 'Date', color: theme.foreground }, ticks: { color: theme.textMuted, maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 4 }, grid: { display: true, color: theme.textMuted + '33' } },
+                    y: { title: { display: true, text: 'Millions', color: theme.foreground }, ticks: { color: theme.textMuted }, grid: { display: true, color: theme.textMuted + '33' }, beginAtZero: true }
                 },
                 plugins: {
-                    title: { display: true, text: 'Shares Bought Back', color: theme.foreground },
+                    title: { display: true, text: 'Shares Bought Back', color: theme.foreground, font: { size: 12 } },
                     tooltip: { 
                         mode: 'index', 
                         intersect: false, 
@@ -736,14 +1320,15 @@
                         bodyColor: theme.foreground, 
                         titleColor: theme.foreground 
                     },
-                    legend: { labels: { color: theme.foreground } }
+                    legend: { 
+                        labels: { color: theme.foreground, font: { size: 10 } },
+                        position: 'top'
+                    }
                 }
             }
         });
-
-        charts.push(debtChart);
         
-        // Market Mechanics charts are handled differently since they're in a container
+        // Market Mechanics charts array
         const marketMechanicsCharts = [marketCapChart, floatChart, sharesOutstandingChart, sharesBoughtBackChart];
 
         // Date Range Handling (for Price + Volume only)
@@ -769,7 +1354,7 @@
         let activeChartIndex = 0;
         const chartElements = [
             document.getElementById('priceVolumeChart'),
-            document.getElementById('earningsChart'),
+            document.getElementById('earningsContainer'),
             document.getElementById('debtChart'),
             document.getElementById('marketMechanicsContainer')
         ];
@@ -786,13 +1371,25 @@
             tabs.forEach((tab, index) => tab.classList.toggle('active', index === activeChartIndex));
             controlsBar.classList.toggle('active', activeChartIndex === 0);
             
-            // Update visible charts
-            if (activeChartIndex < 3) {
-                if (charts[activeChartIndex]) charts[activeChartIndex].resize();
-            } else {
-                // For Market Mechanics, resize all sub-charts
-                marketMechanicsCharts.forEach(chart => chart.resize());
-            }
+            // Update visible charts with a slight delay to ensure proper rendering
+            setTimeout(() => {
+                if (activeChartIndex === 0) {
+                    if (charts[activeChartIndex]) charts[activeChartIndex].resize();
+                } else if (activeChartIndex === 1) {
+                    // For Earnings tab, resize all earnings charts
+                    if (charts[activeChartIndex]) charts[activeChartIndex].resize();
+                    earningsCharts.forEach(chart => chart.resize());
+                } else if (activeChartIndex === 2) {
+                    if (charts[activeChartIndex]) charts[activeChartIndex].resize();
+                } else if (activeChartIndex === 3) {
+                    // For Market Mechanics, resize all sub-charts
+                    marketMechanicsCharts.forEach(chart => {
+                        if (chart && typeof chart.resize === 'function') {
+                            chart.resize();
+                        }
+                    });
+                }
+            }, 50);
         }
 
         updateChartVisibility();
@@ -831,6 +1428,50 @@
                 yAxis.type = yAxis.type === 'logarithmic' ? 'linear' : 'logarithmic';
                 priceVolumeChart.update();
             }
+        });
+        
+        // Force resize of all charts when the window is resized
+        window.addEventListener('resize', function() {
+            charts.forEach(chart => {
+                if (chart && typeof chart.resize === 'function') {
+                    chart.resize();
+                }
+            });
+            
+            earningsCharts.forEach(chart => {
+                if (chart && typeof chart.resize === 'function') {
+                    chart.resize();
+                }
+            });
+            
+            marketMechanicsCharts.forEach(chart => {
+                if (chart && typeof chart.resize === 'function') {
+                    chart.resize();
+                }
+            });
+        });
+
+        // Call resize on initial load for all charts
+        window.addEventListener('load', function() {
+            setTimeout(() => {
+                charts.forEach(chart => {
+                    if (chart && typeof chart.resize === 'function') {
+                        chart.resize();
+                    }
+                });
+                
+                earningsCharts.forEach(chart => {
+                    if (chart && typeof chart.resize === 'function') {
+                        chart.resize();
+                    }
+                });
+                
+                marketMechanicsCharts.forEach(chart => {
+                    if (chart && typeof chart.resize === 'function') {
+                        chart.resize();
+                    }
+                });
+            }, 100);
         });
     </script>
 </body>
