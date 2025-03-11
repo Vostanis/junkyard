@@ -20,38 +20,47 @@
 -- =====================================================================
 
 -- Stock Metrics
-DROP MATERIALIZED VIEW stock.metrics_matv;
-CREATE MATERIALIZED VIEW stock.metrics_matv AS (
-SELECT
-	s.symbol,
-	s.title,
-	l.metric,
-	m.start_date,
-	m.end_date,
-	m.val,
-	ARRAY_AGG(DISTINCT m.form) AS forms,
-	ARRAY_AGG(DISTINCT m.accn) AS accns
+-- DROP MATERIALIZED VIEW stock.metrics_matv;
+-- CREATE MATERIALIZED VIEW stock.metrics_matv AS (
+-- SELECT
+-- 	s.symbol,
+-- 	s.title,
+-- 	l.metric,
+-- 	m.start_date,
+-- 	m.end_date,
+-- 	m.val,
+-- 	ARRAY_AGG(DISTINCT m.form) AS forms,
+-- 	ARRAY_AGG(DISTINCT m.accn) AS accns
 	
-FROM stock.metrics m
-INNER JOIN stock.symbols s ON m.symbol_pk = s.pk
-INNER JOIN stock.metrics_lib l ON m.metric_pk = l.pk
+-- FROM stock.metrics m
+-- INNER JOIN stock.symbols s ON m.symbol_pk = s.pk
+-- INNER JOIN stock.metrics_lib l ON m.metric_pk = l.pk
 
+-- WHERE 
+-- 	((m.end_date - m.start_date) <= 120) OR (start_date IS NULL AND m.frame LIKE '%I')
+-- GROUP BY 
+-- 	s.symbol,
+-- 	s.title,
+-- 	l.metric,
+-- 	m.start_date,
+-- 	m.end_date,
+-- 	m.val
+-- ORDER BY 
+-- 	m.start_date DESC
+-- );
+
+DROP VIEW IF EXISTS stock.metrics_q;
+CREATE VIEW stock.metrics_q AS (
+SELECT *
+FROM stock.metrics m
 WHERE 
-	((m.end_date - m.start_date) <= 120) OR (start_date IS NULL AND m.frame LIKE '%I')
-GROUP BY 
-	s.symbol,
-	s.title,
-	l.metric,
-	m.start_date,
-	m.end_date,
-	m.val
-ORDER BY 
-	m.start_date DESC
+		((m.end_date - m.start_date) <= 100) -- typical quarterly entries
+	OR (m.start_date IS NULL AND m.frame LIKE '%I') -- instantaneous data
+	OR (m.period = 'I') -- inferred
 );
 
 -- Stock Prices
 CREATE MATERIALIZED VIEW IF NOT EXISTS stock.prices_matv AS
-
 WITH 
 -- moving averages for volume & price (adj. close), per 7, 90, and 365 x interval
 moving_average_cte AS (
@@ -59,7 +68,21 @@ moving_average_cte AS (
 		pr.symbol_pk,
 		pr.interval_pk,
 		pr.dt,
-		pr.volume,
+		AVG(pr.adj_close) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+		) AS adj_close_20ma,
+		AVG(pr.adj_close) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 49 PRECEDING AND CURRENT ROW
+		) AS adj_close_50ma,
+		AVG(pr.adj_close) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 199 PRECEDING AND CURRENT ROW
+		) AS adj_close_200ma,
 		AVG(pr.volume) OVER (
 			PARTITION BY pr.symbol_pk, pr.interval_pk
 			ORDER BY pr.dt
@@ -113,6 +136,9 @@ SELECT
 	pr.low,
 	pr.closing,
 	pr.adj_close,
+	ma.adj_close_20ma,
+	ma.adj_close_50ma,
+	ma.adj_close_200ma,
 	pr.volume,
 	ma.volume_7ma,
 	ma.volume_90ma,

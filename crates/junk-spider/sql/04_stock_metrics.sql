@@ -31,9 +31,9 @@
 -- WHERE form = 'Inferred';
 
 WITH
-debug(active, metric_pk) AS (
-	VALUES(false, 9)
-)
+-- debug(active, metric_pk) AS (
+-- 	VALUES(false, 9)
+-- )
 
 -- gather all the annual metrics and give an ID
 annual_cte AS (
