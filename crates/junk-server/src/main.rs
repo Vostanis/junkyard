@@ -32,6 +32,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(tera.clone()))
             .service(rest_api::index)
+            .service(handlers::login)
             .service(handlers::home)
             .service(handlers::stock_dashboard)
             .service(Redoc::with_url("/redoc", ApiDoc::openapi()))

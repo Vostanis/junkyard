@@ -7,6 +7,7 @@ readme.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+actix-cors = "0.7.1"
 actix-files = "0.6.6"
 actix-web = "4.9.0"
 bigdecimal = { version = "0.4.7", features = ["serde-json"] }
@@ -20,5 +21,5 @@ sqlx = { workspace = true, features = ["bigdecimal", "chrono"] }
 tera = "1.20.0"
 tokio-postgres.workspace = true
 tracing.workspace = true
-utoipa = "5.3.1"
+utoipa = { version = "5.3.1", features = ["macros"] }
 utoipa-redoc = { version = "6.0.0", features = ["actix-web"] }

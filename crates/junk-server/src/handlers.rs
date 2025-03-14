@@ -42,6 +42,15 @@ pub async fn home(pool: web::Data<sqlx::PgPool>, tera: web::Data<Tera>) -> impl 
     }
 }
 
+#[get("/login")]
+pub async fn login(tera: web::Data<Tera>) -> impl Responder {
+    let context = Context::new();
+    let rendered = tera
+        .render("login.html", &context)
+        .expect("failed to render login page");
+    HttpResponse::Ok().content_type("text/html").body(rendered)
+}
+
 #[derive(sqlx::FromRow, serde::Serialize, serde::Deserialize)]
 pub struct Price {
     pub date: chrono::NaiveDate,
@@ -94,8 +103,8 @@ pub async fn stock_dashboard(
                     SELECT json_agg(
                         json_build_object(
                             'symbol', symbol,
-                            'title', REGEXP_REPLACE(title, '[''\\\/]', '', 'g'),
-                            'industry', REGEXP_REPLACE(industry, '[''\\\/]', '', 'g')  
+                            'title', REGEXP_REPLACE(title, '['';\\\/]', '', 'g'),
+                            'industry', REGEXP_REPLACE(industry, '['';\\\/]', '', 'g')  
                         )
                     )
                     FROM stock.symbols
@@ -121,6 +130,8 @@ pub async fn stock_dashboard(
                 'financials', (
                     SELECT json_agg(
                         json_build_object(
+                            -- GENERAL
+                            -- ============================================
                             'end_date', end_date,
                             'price', price,
                             'revenue', revenue,
@@ -139,7 +150,34 @@ pub async fn stock_dashboard(
                             'market_cap', market_cap,
                             'shares_outstanding', shares_outstanding,
                             'float', float,
-                            'value_of_shares_bought_back', value_of_shares_bought_back
+                            'value_of_shares_bought_back', value_of_shares_bought_back,
+
+                            -- ASSETS
+                            -- ============================================
+                            'assets_current', assets_current,
+                            'assets_non_current', assets_non_current,
+                            'cash', cash,
+                            'marketable_securities_current', marketable_securities_current,
+                            'nontrade_receivable_current', nontrade_receivable_current,
+                            'nontrace_receivable_non_current', nontrade_receivable_non_current,
+                            'inventory_net', inventory_net,
+                            'property_plant_and_equitment_net', property_plant_and_equipment_net,
+                            'other_assets_current', other_assets_current,
+                            'other_assets_non_current', other_assets_non_current,
+                            'accounts_receivable_current', accounts_receivable_current,
+
+                            -- LIABILITIES
+                            -- ============================================
+                            'liabilities_current', liabilities_current,
+                            'liabilities_non_current', liabilities_non_current,
+                            'accounts_payable_current', accounts_payable_current,
+                            'contracts_with_customer_current', contracts_with_customer_current,
+                            'contracts_with_customer_non_current', contracts_with_customer_non_current,
+                            'commercial_paper', commercial_paper,
+                            'long_term_debt_current', long_term_debt_current,
+                            'long_term_debt_non_current', long_term_debt_non_current,
+                            'other_liabilities_current', other_liabilities_current,
+                            'other_liabilities_non_current', other_liabilities_non_current
                         )
                         ORDER BY end_date DESC
                     )
@@ -159,6 +197,8 @@ pub async fn stock_dashboard(
 
             let mut context = Context::new();
 
+            context.insert("symbol", &symbol);
+
             let symbols_json = serde_json::to_string(&combined_data["symbols"])
                 .expect("Failed to serialize symbols to JSON");
             context.insert("symbols", &symbols_json);
@@ -172,8 +212,8 @@ pub async fn stock_dashboard(
             context.insert("financials", &financials_json);
 
             let rendered = tera
-                .render("stock_dashboard.html", &context)
-                .expect("failed to render stock_dashboard");
+                .render("stock.html", &context)
+                .expect("failed to render stock dashboard");
             HttpResponse::Ok().content_type("text/html").body(rendered)
         }
         Err(e) => {
