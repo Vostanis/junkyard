@@ -401,7 +401,7 @@ liabilities_non_current AS (
 		end_date,
 		val
 ),
-accountables_payable_current AS (
+accounts_payable_current AS (
 	SELECT DISTINCT
 		symbol_pk,
 		start_date,
@@ -489,7 +489,20 @@ long_term_debt_current AS (
 long_term_debt_non_current AS (
 	SELECT DISTINCT
 		symbol_pk,
-,
+		start_date,
+		end_date,
+		val
+	FROM stock.metrics m
+	INNER JOIN stock.metrics_lib lib
+		ON m.metric_pk = lib.pk
+	WHERE
+		lib.metric = 'LongTermDebtNoncurrent'
+	GROUP BY 
+		symbol_pk,
+		start_date,
+		end_date,
+		val
+),
 other_liabilities_current AS (
 	SELECT DISTINCT
 		symbol_pk,
@@ -659,8 +672,8 @@ SELECT DISTINCT
 	commercial_paper.val AS commercial_paper,
 	long_term_debt_current.val AS long_term_debt_current,
 	long_term_debt_non_current.val AS long_term_debt_non_current,
-	other_liabilities_current.val AS other_assets_current,
-	other_liabilities_non_current.val AS other_liabilities_non_current,
+	other_liabilities_current.val AS other_liabilities_current,
+	other_liabilities_non_current.val AS other_liabilities_non_current
 
 FROM stock.metrics_q m
 	LEFT JOIN stock.prices prices

@@ -1,0 +1,25 @@
+[package]
+name = "junk-webapp"
+edition = "2021"
+version.workspace = true
+readme.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-cors = "0.7.1"
+actix-files = "0.6.6"
+actix-web = "4.9.0"
+bigdecimal = { version = "0.4.7", features = ["serde-json"] }
+chrono = { workspace = true, features = ["serde"] }
+deadpool-postgres.workspace = true
+dotenv.workspace = true
+env_logger = "0.11.6"
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { workspace = true, features = ["bigdecimal", "chrono"] }
+tera = "1.20.0"
+tokio-postgres.workspace = true
+tracing.workspace = true
+utoipa = { version = "5.3.1", features = ["macros"] }
+utoipa-redoc = { version = "6.0.0", features = ["actix-web"] }
