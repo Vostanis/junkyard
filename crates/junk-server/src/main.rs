@@ -1,5 +1,5 @@
 use actix_files as fs;
-use actix_web::{middleware::Logger, web, App, HttpServer};
+use actix_web::{web, App, HttpServer};
 use dotenv::{dotenv, var};
 use log::info;
 use utoipa::OpenApi;
@@ -11,14 +11,16 @@ use rest_api::stock;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Initialize logger
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("trace"));
     dotenv().ok();
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
 
     // build pool from .env DATABASE_URL
     let db_url = var("FINDUMP_URL").expect("FINDUMP_URL must be set");
-    let pool = sqlx::PgPool::connect(&db_url)
-        .await
-        .expect("failed to connect to findump");
+    let pool = web::Data::new(
+        sqlx::PgPool::connect(&db_url)
+            .await
+            .expect("failed to connect to findump"),
+    );
 
     let bind_address = "127.0.0.1:8081";
     info!("Starting server at http://{}", bind_address);
@@ -30,18 +32,14 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .wrap(Logger::default())
-            .app_data(web::Data::new(pool.clone()))
-
+            .app_data(pool.clone())
             /* API endpoints */
             // 1. stock schema
             .service(stock::symbols)
             // .service(stock::prices)
             // .service(stock::metrics)
             // .service(stock::aggregates)
-
             // 2. crypto schema
-
             // Serve the REST API Documentation
             .service(Redoc::with_url("/redoc", ApiDoc::openapi()))
             // Serve the WASM package files
