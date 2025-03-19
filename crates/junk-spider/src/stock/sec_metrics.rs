@@ -16,7 +16,7 @@ use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
 use tracing::{debug, error, info, trace};
 
-/// The process for copying SEC metric.json files from the /buffer/ directory into the database.
+/// The process for copying SEC metric.json files from the "buffer/" directory into the database.
 struct Process {
     tickers: Vec<Ticker>,
     metrics: Arc<Mutex<KeyTracker<i32, String>>>,
@@ -231,11 +231,11 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                                                 filing_date: convert_date_type(&cell.filing_date)
                                                     .expect("failed to convert date type"),
                                                 year: cell.fy,
-                                                period: cell.fp,
-                                                form: cell.form,
+                                                period: cell.fp.unwrap_or_else(|| "".to_string()),
+                                                form: cell.form.unwrap_or_else(|| "".to_string()),
                                                 val: OrderedFloat(cell.val),
-                                                accn: cell.accn,
-                                                frame: cell.frame,
+                                                accn: cell.accn.unwrap_or_else(|| "".to_string()),
+                                                frame: Some(cell.frame.unwrap_or_else(|| "".to_string())),
                                             });
                                         }
 
@@ -279,7 +279,7 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                 let exists: HashSet<MetricPrimaryKey> = pg_client
                     .query(
                         "
-                        SELECT symbol_pk, metric_pk, acc_pk, end_date, filing_date, year, period, form, val, accn FROM stock.metrics
+                        SELECT symbol_pk, metric_pk, acc_pk, end_date, filing_date, period, form, val, accn FROM stock.metrics
                         WHERE symbol_pk = $1
                     ",
                         &[&ticker.pk],
@@ -293,11 +293,11 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
                         acc_pk: row.get(2),
                         end_date: row.get(3),
                         filing_date: row.get(4),
-                        year: row.get(5),
-                        period: row.get(6),
-                        form: row.get(7),
-                        val: OrderedFloat(row.get(8)),
-                        accn: row.get(9),
+                        // year: row.get(5),
+                        period: row.get(5),
+                        form: row.get(6),
+                        val: OrderedFloat(row.get(7)),
+                        accn: row.get(8),
                     })
                     .collect();
 
@@ -436,7 +436,7 @@ pub struct Metric {
     pub start_date: Option<chrono::NaiveDate>,
     pub end_date: chrono::NaiveDate,
     pub filing_date: chrono::NaiveDate,
-    pub year: i16,
+    pub year: Option<i16>,
     pub period: String,
     pub form: String,
     pub val: OrderedFloat<f64>,
@@ -452,7 +452,7 @@ impl Metric {
             acc_pk: self.acc_pk,
             end_date: self.end_date,
             filing_date: self.filing_date,
-            year: self.year,
+            // year: self.year,
             period: self.period.clone(),
             form: self.form.clone(),
             val: self.val,
@@ -468,7 +468,7 @@ pub struct MetricPrimaryKey {
     pub acc_pk: i32,
     pub end_date: chrono::NaiveDate,
     pub filing_date: chrono::NaiveDate,
-    pub year: i16,
+    // pub year: i16,
     pub period: String,
     pub form: String,
     pub val: OrderedFloat<f64>,
@@ -568,10 +568,10 @@ struct DataCell {
     #[serde(rename = "filed")]
     filing_date: String,
     val: f64,
-    fy: i16,
-    fp: String,
-    form: String,
-    accn: String,
+    fy: Option<i16>,
+    fp: Option<String>,
+    form: Option<String>,
+    accn: Option<String>,
     frame: Option<String>,
 }
 //                          {

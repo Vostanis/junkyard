@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ symbol }}{% endblock %}
+
+{% block head_extra %}
+<style>
+    /* Any stock-specific inline styles can go here if needed */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="search-bar">
+    <a href="/home" class="home-button">⌂</a>
+    <input type="text" id="searchInput" placeholder="Search stocks..." autocomplete="off" value="{{ symbol }}" />
+    <div class="search-results" id="searchResults">
+        <ul id="resultsList"></ul>
+    </div>
+</div>
+
+<div class="tab-bar">
+    <button class="tab active" data-chart-index="0">Price & Volume</button>
+    <button class="tab" data-chart-index="1">Earnings</button>
+    <button class="tab" data-chart-index="2">Debt & Equity</button>
+    <button class="tab" data-chart-index="3">Market Mechanics</button>
+    <button class="tab" data-chart-index="4">Balance Sheet</button>
+</div>
+
+<div class="chart-container" id="chartContainer"> 
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-grow: 1;">
+        <!-- <button class="arrow-button" id="prevChart">←</button> -->
+        <div class="chart-wrapper">
+            <canvas id="priceVolumeChart" class="active"></canvas>
+            
+            <!-- Earnings container with 67-33 split -->
+            <div id="earningsContainer" class="hidden split-earnings-container">
+                <div class="chart-left">
+                    <canvas id="earningsChart"></canvas>
+                </div>
+                <div class="chart-right">
+                    <div class="chart-top">
+                        <canvas id="operatingProfitChart"></canvas>
+                    </div>
+                    <div class="chart-bottom">
+                        <canvas id="epsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <canvas id="debtChart" class="hidden"></canvas>
+            
+            <!-- Market Mechanics container -->
+            <div id="marketMechanicsContainer" class="hidden split-chart-container">
+                <div class="chart-half">
+                    <div class="chart-wrapper-quad">
+                        <canvas id="marketCapChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-half">
+                    <div class="chart-wrapper-quad">
+                        <canvas id="sharesOutstandingChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-half">
+                    <div class="chart-wrapper-quad">
+                        <canvas id="floatChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-half">
+                    <div class="chart-wrapper-quad">
+                        <canvas id="sharesBoughtBackChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div id="balanceSheetContainer" class="hidden split-chart-container">
+                <div class="chart-half" style="height: 50%; width: 100%;">
+                    <div class="chart-wrapper-quad">
+                        <canvas id="assetBreakdownChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-half" style="height: 50%; width: 100%;">
+                    <div class="chart-wrapper-quad">
+                        <canvas id="liabilityBreakdownChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- <button class="arrow-button" id="nextChart">→</button> -->
+    </div>
+    <div class="controls-bar active">
+        <select id="dateRange">
+            <option value="1M">1 Month</option>
+            <option value="3M">3 Months</option>
+            <option value="6M">6 Months</option>
+            <option value="1Y">1 Year</option>
+            <option value="5Y">5 Years</option>
+            <option value="ALL" selected>All</option>
+        </select>
+        <button id="toggleLogScale">Toggle Log Scale</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.2/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+<script>
+    // Pass data from server to frontend - properly JSON stringified
+    const prices_json = '{{ prices | safe }}';
+    prices = JSON.parse(prices_json);
+    const financials_json = '{{ financials | safe }}';
+    financials = JSON.parse(financials_json);
+    const symbol = '{{ symbol }}';
+    const symbols_json = '{{ symbols | safe }}';
+    stockData = JSON.parse(symbols_json);
+</script>
+<script src="/static/js/search.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/dashboard.js"></script>
+<script src="/static/js/balance-sheet-charts.js"></script>
+<script src="/static/js/tab-fix.js"></script>
+{% endblock %}

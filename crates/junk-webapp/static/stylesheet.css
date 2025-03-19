@@ -1,0 +1,490 @@
+/* Theme-bear inspired variables */
+:root {
+    --background: #1f2023;           /* editor.background */
+    --foreground: #bcb28d;           /* foreground */
+    --divider-color: #2f3033;        /* editorIndentGuide.background - subtle divider */
+    --accent-blue: #58b2dc;          /* terminal.ansiBlue */
+    --accent-magenta: #e03c8a;       /* terminal.ansiRed */
+    --accent-orange: #e6844f;        /* terminal.ansiYellow */
+    --highlight-bg: #2c5a65;         /* editor.selectionBackground */
+    --hover-bg: #282b31;             /* editor.lineHighlightBackground */
+    --text-muted: #707c74;           /* comment */
+    --graph-bg: #212121;             /* tab.inactiveBackground */
+    --input-bg: #282b31;             /* input background */
+    --card-bg: #272a2f;              /* slightly lighter than background */
+    --label-color: #707c74;          /* Added missing label-color variable */
+}
+
+/* ------------------- Base styles ------------------- */
+body {
+    font-family: 'JetBrains Mono', monospace;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    height: 100vh;
+    margin: 0;
+    flex-direction: column;
+    position: relative;
+    background: var(--background);
+    color: var(--foreground);
+    overflow-x: hidden; /* Prevent horizontal scrollbar */
+}
+
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+/* ------------------- Home page styles ------------------- */
+.header-container {
+    position: absolute;
+    top: 15%;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    width: 100%;
+}
+
+h1 {
+    color: var(--foreground);
+    font-size: 2.5em;
+    margin-bottom: 20px;
+}
+
+/* Search form */
+form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+input {
+    font-family: 'JetBrains Mono', monospace;
+    width: 800px;
+    max-width: 90vw; /* Responsive width */
+    padding: 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--divider-color);
+    color: var(--foreground);
+    border-radius: 4px;
+    outline: none;
+}
+
+input:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 5px var(--accent-blue);
+}
+
+small {
+    color: var(--text-muted);
+    font-size: 0.8em;
+    margin-top: 5px;
+}
+
+/* List styles */
+ul {
+    width: 800px;
+    max-width: 90vw; /* Responsive width */
+    list-style: none;
+    text-align: center;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    position: absolute;
+    top: 32%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+li {
+    padding: 8px 0;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+li.label {
+    color: var(--label-color);
+    text-transform: uppercase;
+    font-size: 0.8em;
+    letter-spacing: 0.0125em;
+    margin: 1rem 0 0.25rem 0;
+}
+
+li:not(.label) {
+    color: var(--foreground);
+}
+
+li:not(.label):hover {
+    background-color: var(--hover-bg);
+}
+
+li.highlighted {
+    background-color: var(--highlight-bg);
+    color: var(--foreground);
+}
+
+li strong {
+    color: var(--accent-magenta);
+}
+
+li weak {
+    color: var(--text-muted);
+}
+
+button {
+    font-family: 'JetBrains Mono', monospace;
+    padding: 10px 20px;
+    background: var(--accent-blue);
+    border: none;
+    color: var(--background);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: var(--highlight-bg);
+}
+
+button:focus {
+    outline: none;
+    box-shadow: 0 0 5px var(--accent-blue);
+}
+
+button:active {
+    background-color: var(--accent-magenta);
+}
+
+/* ------------------- Stock Dashboard styles ------------------- */
+.search-bar {
+    background: var(--background);
+    padding: 10px;
+    border-bottom: 1px solid var(--text-muted);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Home button styles */
+.home-button {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background-color: var(--background);
+    color: var(--foreground);
+    border-radius: 4px;
+    border: 1px double var(--foreground);
+    cursor: pointer;
+    font-size: 18px;
+    transition: background-color 0.3s ease;
+    text-decoration: none;
+    z-index: 5;
+}
+
+.home-button:hover {
+    background-color: var(--accent-blue);
+}
+
+#searchInput, #symbolInput {
+    width: 50%;
+    padding: 8px 12px;
+    background: var(--graph-bg);
+    color: var(--foreground);
+    border: 1px solid var(--text-muted);
+    border-radius: 4px;
+    position: relative;
+    left: auto;
+    transform: none;
+    max-width: 90%;
+}
+
+#searchInput::placeholder, #symbolInput::placeholder {
+    color: var(--text-muted);
+}
+
+#searchInput:focus, #symbolInput:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 5px var(--accent-blue);
+}
+
+/* Search results dropdown */
+.search-results {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 50%;
+    max-width: 90%;
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: var(--graph-bg);
+    border: 1px solid var(--text-muted);
+    border-radius: 4px;
+    z-index: 1000;
+    display: none; /* Hide by default */
+    margin-top: 5px;
+}
+
+.search-results.visible {
+    display: block;
+}
+
+.search-results ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    position: static;
+    transform: none;
+    width: 100%;
+    max-width: 100%;
+}
+
+.search-results li {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--text-muted);
+    transition: background-color 0.2s ease;
+    text-align: left;
+}
+
+/* Tab navigation */
+.tab-bar {
+    display: flex;
+    justify-content: center;
+    background: var(--background);
+    padding: 10px 0;
+    border-bottom: 1px solid var(--text-muted);
+    width: 100%;
+    overflow-x: auto; /* Allow horizontal scrolling on small screens */
+    box-sizing: border-box;
+}
+
+.tab {
+    padding: 8px 20px;
+    margin: 0 5px;
+    background: var(--background);
+    color: var(--foreground);
+    border: none;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    font-family: 'JetBrains Mono', monospace;
+    text-align: center;
+    min-width: 120px;
+    white-space: nowrap;
+}
+
+.tab.active {
+    background: var(--foreground);
+    color: var(--background);
+}
+
+.tab:hover {
+    background: var(--highlight-bg);
+}
+
+/* Chart container */
+.chart-container {
+    width: 100%;
+    height: calc(100vh - 110px); /* Adjusted height to prevent overflow */
+    padding: 0 20px;
+    box-sizing: border-box;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: space-between;
+    overflow: hidden; /* Prevent scrollbars */
+}
+
+.chart-wrapper {
+    position: relative;
+    flex-grow: 1;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+}
+
+canvas {
+    width: 100% !important;
+    height: 100% !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.hidden {
+    opacity: 0;
+    pointer-events: none;
+    z-index: 0;
+    position: absolute;
+}
+
+.active {
+    opacity: 1;
+    z-index: 1;
+    position: relative;
+}
+
+/* Controls bar */
+.controls-bar {
+    background: var(--background);
+    padding: 10px;
+    border-top: 1px solid var(--text-muted);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    visibility: hidden;
+    width: 100%;
+    box-sizing: border-box;
+    position: relative; /* Ensure proper positioning */
+    left: 0;
+    bottom: 0;
+}
+
+.controls-bar.active {
+    visibility: visible;
+}
+
+#dateRange {
+    padding: 8px 12px;
+    background: var(--graph-bg);
+    color: var(--foreground);
+    border: 1px solid var(--text-muted);
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+}
+
+#dateRange:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 5px var(--accent-blue);
+}
+
+#toggleLogScale {
+    background: transparent;
+    color: var(--foreground);
+    border: 1px solid var(--foreground);
+}
+
+#toggleLogScale:hover {
+    background: var(--highlight-bg);
+    color: var(--foreground);
+    border-color: var(--foreground);
+}
+
+#toggleLogScale:active {
+    background: var(--accent-magenta);
+    color: var(--background);
+    border-color: var(--accent-magenta);
+}
+
+.arrow-button {
+    font-size: 24px;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--background);
+    color: var(--foreground);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.arrow-button:hover {
+    background: var(--highlight-bg);
+}
+
+.arrow-button:active {
+    background: var(--accent-magenta);
+    color: var(--background);
+}
+
+/* Market Mechanics tab styling */
+.split-chart-container {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.chart-half {
+    width: 50%;
+    height: 50%;
+    position: relative;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+.chart-half canvas {
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.chart-wrapper-quad {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Earnings tab styling */
+.split-earnings-container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.chart-left {
+    width: 67%;
+    height: 100%;
+    position: relative;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+.chart-left canvas {
+    position: relative !important;
+}
+
+.chart-right {
+    width: 33%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-top, .chart-bottom {
+    height: 50%;
+    position: relative;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+.chart-top canvas, .chart-bottom canvas {
+    position: relative !important;
+}

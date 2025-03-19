@@ -3,14 +3,15 @@
 -- RELATION TO THE DATABASE
 -- ========================
 --
--- MATERIALIZED VIEWs are used as the entrypoint for publicised data;
--- 1. they are precomputed, and so are fast to query;
--- 2. a layer of transformation between the raw input and the output is
---    cleaner for debugging;
--- 3. and they can be refreshed on a schedule, or on-demand.
+-- MATERIALIZED VIEWs are used as the entrypoint for publicised data, 
+-- since:
+-- 		1. they are precomputed, and so are fast to query;
+-- 		2. a layer of transformation between the raw input and the output 
+--		   is cleaner for debugging;
+-- 		3. and they can be refreshed on a schedule, or on-demand.
 --
--- Therefore, when users query data (via an app or API), they're querying
--- from one of the following views.
+-- Therefore, when users query data (via an app or API) they're querying
+-- from one of the VIEWs built with this script.
 --
 --------------------------------------------------------------------------
 
@@ -19,31 +20,47 @@
 -- =====================================================================
 
 -- Stock Metrics
-CREATE MATERIALIZED VIEW IF NOT EXISTS stock.metrics_matv AS
-SELECT
-	sy.symbol,
-	sy.title,
-	m.start_date,
-	m.end_date,
-	m.year,
-	m.period,
-	m.form,
-	m.frame,
-	mlib.metric,
-	m.val,
-	acc.accounting
-FROM stock.symbols AS sy
-INNER JOIN stock.metrics AS m
-	ON sy.pk = m.symbol_pk
-INNER JOIN stock.metrics_lib AS mlib
-	ON mlib.pk = m.metric_pk
-INNER JOIN stock.acc_stds AS acc
-	ON acc.pk = m.acc_pk
-;
+-- DROP MATERIALIZED VIEW stock.metrics_matv;
+-- CREATE MATERIALIZED VIEW stock.metrics_matv AS (
+-- SELECT
+-- 	s.symbol,
+-- 	s.title,
+-- 	l.metric,
+-- 	m.start_date,
+-- 	m.end_date,
+-- 	m.val,
+-- 	ARRAY_AGG(DISTINCT m.form) AS forms,
+-- 	ARRAY_AGG(DISTINCT m.accn) AS accns
+	
+-- FROM stock.metrics m
+-- INNER JOIN stock.symbols s ON m.symbol_pk = s.pk
+-- INNER JOIN stock.metrics_lib l ON m.metric_pk = l.pk
+
+-- WHERE 
+-- 	((m.end_date - m.start_date) <= 120) OR (start_date IS NULL AND m.frame LIKE '%I')
+-- GROUP BY 
+-- 	s.symbol,
+-- 	s.title,
+-- 	l.metric,
+-- 	m.start_date,
+-- 	m.end_date,
+-- 	m.val
+-- ORDER BY 
+-- 	m.start_date DESC
+-- );
+
+DROP VIEW IF EXISTS stock.metrics_q;
+CREATE VIEW stock.metrics_q AS (
+SELECT *
+FROM stock.metrics m
+WHERE 
+		((m.end_date - m.start_date) <= 100) -- typical quarterly entries
+	OR (m.start_date IS NULL AND m.frame LIKE '%I') -- instantaneous data
+	OR (m.period = 'I') -- inferred
+);
 
 -- Stock Prices
 CREATE MATERIALIZED VIEW IF NOT EXISTS stock.prices_matv AS
-
 WITH 
 -- moving averages for volume & price (adj. close), per 7, 90, and 365 x interval
 moving_average_cte AS (
@@ -51,7 +68,21 @@ moving_average_cte AS (
 		pr.symbol_pk,
 		pr.interval_pk,
 		pr.dt,
-		pr.volume,
+		AVG(pr.adj_close) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 19 PRECEDING AND CURRENT ROW
+		) AS adj_close_20ma,
+		AVG(pr.adj_close) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 49 PRECEDING AND CURRENT ROW
+		) AS adj_close_50ma,
+		AVG(pr.adj_close) OVER (
+			PARTITION BY pr.symbol_pk, pr.interval_pk
+			ORDER BY pr.dt
+			ROWS BETWEEN 199 PRECEDING AND CURRENT ROW
+		) AS adj_close_200ma,
 		AVG(pr.volume) OVER (
 			PARTITION BY pr.symbol_pk, pr.interval_pk
 			ORDER BY pr.dt
@@ -105,6 +136,9 @@ SELECT
 	pr.low,
 	pr.closing,
 	pr.adj_close,
+	ma.adj_close_20ma,
+	ma.adj_close_50ma,
+	ma.adj_close_200ma,
 	pr.volume,
 	ma.volume_7ma,
 	ma.volume_90ma,
@@ -128,6 +162,8 @@ LEFT JOIN percentage_change_cte AS pc
 	AND pr.interval_pk = pc.interval_pk
 	AND pr.dt = pc.dt
 ;
+
+--------------------------------------------------------------------------
 
 -- =====================================================================
 -- CRYPTO

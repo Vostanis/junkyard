@@ -27,26 +27,20 @@
 --
 --------------------------------------------------------------------------
 
--- DELETE FROM stock.metrics
--- WHERE form = 'Inferred';
 
 WITH
--- debug(active, metric_pk) AS (
--- 	VALUES(false, 9)
--- )
-
 -- gather all the annual metrics and give an ID
 annual_cte AS (
 	SELECT DISTINCT
 		ROW_NUMBER() OVER () AS id_a,
 		symbol_pk,
 		metric_pk,
-		acc_pk, 
+		taxonomy_pk, 
 		start_date,
 		end_date,
 		DATERANGE(start_date, end_date) AS date_range,
 		val
-	FROM stock.metrics
+	FROM stock.fact_metrics
 	WHERE 
 			form = '10-K'
 		AND start_date IS NOT NULL
@@ -54,13 +48,13 @@ annual_cte AS (
 	GROUP BY
 		symbol_pk,
 		metric_pk, 
-		acc_pk,
+		taxonomy_pk,
 		val,
 		start_date,
 		end_date
 ),
 
--- match all the quarterly entries to the date range an annual entry
+-- match all the quarterly entries to the date range of an annual entry
 quarterly_cte AS (
 	SELECT DISTINCT
 		id_a,
@@ -72,7 +66,7 @@ quarterly_cte AS (
 		) AS id_q,
 		qs.symbol_pk,
 		qs.metric_pk,
-		qs.acc_pk,
+		qs.taxonomy_pk,
 		qs.val,
 		qs.start_date,
 		qs.end_date,
@@ -87,10 +81,10 @@ quarterly_cte AS (
 			metric_pk,
 			start_date,
 			end_date,
-			acc_pk,
+			taxonomy_pk,
 			DATERANGE(start_date, end_date) AS date_range,
 			MAX(val) AS val
-		FROM stock.metrics
+		FROM stock.fact_metrics
 		WHERE
 				form = '10-Q'
 			AND start_date IS NOT NULL
@@ -98,7 +92,7 @@ quarterly_cte AS (
 		GROUP BY
 			symbol_pk,
 			metric_pk,
-			acc_pk,
+			taxonomy_pk,
 			start_date,
 			end_date
 	) qs ON 
@@ -112,7 +106,7 @@ ordered_cte AS (
 	SELECT
 		ann.symbol_pk,
 		ann.metric_pk,
-		ann.acc_pk,
+		ann.taxonomy_pk,
 		ann.val AS annual,
 		MAX(qt.val) FILTER (WHERE qt.id_q = 1) AS q1,
 		MAX(qt.val) FILTER (WHERE qt.id_q = 2) AS q2,
@@ -135,16 +129,16 @@ ordered_cte AS (
 	GROUP BY
 		ann.symbol_pk,
 		ann.metric_pk,
-		ann.acc_pk,
+		ann.taxonomy_pk,
 		ann.val,
 		ann.date_range
 )
 
 -- collect only inferred values; to be INSERTed in to the original stock.metrics table
-INSERT INTO stock.metrics (
+INSERT INTO stock.fact_metrics (
 	symbol_pk,
 	metric_pk,
-	acc_pk,
+	taxonomy_pk,
 	start_date,
 	end_date,
 	filing_date,
@@ -158,7 +152,7 @@ INSERT INTO stock.metrics (
 SELECT
 	o.symbol_pk,
 	o.metric_pk,
-	o.acc_pk,
+	o.taxonomy_pk,
 
 	-- infer "start_date"
 	CASE

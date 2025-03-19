@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}assetlib{% endblock %}
+
+{% block content %}
+<div class="header-container">
+    <h1>assetlib</h1>
+    <form id="searchForm" method="get">
+        <input type="text" id="symbolInput" placeholder="Search assets (e.g., AAPL, BTCUSDT)" required autocomplete="off">
+        <small>Press '/' to focus search</small>
+    </form>
+</div>
+
+<ul id="list"></ul>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+<script>
+    // Tickers data passed from the backend
+    const tickers_json = '{{ tickers | safe }}';
+    const tickers = JSON.parse(tickers_json);
+
+    const symbolInput = document.querySelector("#symbolInput");
+    const list = document.querySelector("#list");
+
+    let currentIndex = -1; // Track the currently selected index
+    let selectedItem = null;
+
+    // Initialize Fuse.js
+    const fuseOptions = {
+        includeScore: true,
+        includeMatches: true,
+        threshold: 0.5, // Adjust this value to control the fuzziness
+        keys: ['symbol', 'title', 'industry'], // Search through the entire string
+        limit: 30
+    };
+    const fuse = new Fuse(tickers, fuseOptions);
+
+    symbolInput.addEventListener("keyup", onKeydown);
+
+    function onKeydown(e) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            handleArrowKeys(e);
+            return;
+        }
+
+        if (e.key === "Enter") {
+            handleEnterKey(); // Call handleEnterKey when Enter is pressed
+            return;
+        }
+
+        if (!e.target.value) {
+            list.innerHTML = '';
+            currentIndex = -1; // Reset index when input is cleared
+            selectedItem = null;
+            return;
+        }
+
+        const results = fuse.search(e.target.value);
+        outputSearchResults(results);
+    }
+
+    function outputSearchResults(results) {
+        // Clear list
+        list.innerHTML = '';
+        currentIndex = -1; // Reset index when new results are shown
+
+        // No results found
+        if (results.length === 0) {
+            list.innerHTML = '<li>No matches found</li>';
+            return;
+        }
+
+        // Label 'Matches'
+        label(list, 'Search Results');
+
+        // Show results
+        results.slice(0, 30).forEach((result) => {
+            const el = document.createElement('li');
+            el.innerHTML = `
+                <strong>[${result.item.symbol}]</strong> ${result.item.title} <weak>${result.item.industry}</weak>
+            `;
+
+            el.dataset.url = `/asset/${result.item.symbol}`; // Set URL in data attribute
+
+            el.addEventListener('click', () => {
+                window.location.href = el.dataset.url; // Navigate on click
+            });
+
+            list.appendChild(el);
+        });
+    }
+
+    function label(list, text) {
+        const line = document.createElement('li');
+        line.innerHTML = text;
+        line.className = 'label';
+        list.appendChild(line);
+    }
+
+    function handleArrowKeys(e) {
+        const items = Array.from(list.querySelectorAll("li:not(.label)"));
+
+        if (items.length === 0) return;
+
+        if (e.key === "ArrowDown") {
+            currentIndex++;
+            if (currentIndex >= items.length) currentIndex = 0; // Loop back to the top
+        } else if (e.key === "ArrowUp") {
+            currentIndex--;
+            if (currentIndex < 0) currentIndex = items.length - 1; // Loop back to the bottom
+        }
+
+        updateHighlight(items);
+        selectedItem = items[currentIndex];
+    }
+
+    function handleEnterKey() {
+        if (selectedItem) {
+            const url = selectedItem.dataset.url; // Retrieve the URL from the selected item's dataset
+            if (url) {
+                window.location.href = url; // Redirect to the URL
+            }
+        }
+    }
+
+    function updateHighlight(items) {
+        items.forEach((item, index) => {
+            item.classList.toggle('highlighted', index === currentIndex);
+            if (index === currentIndex) {
+                item.scrollIntoView({ block: "nearest" });
+            }
+        });
+    }
+</script>
+
+<script>
+    // Keyboard shortcut for search bar focus
+    document.addEventListener('keydown', function(e) {
+        // Check if the pressed key is '/' and no input field is currently focused
+        if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+            e.preventDefault(); // Prevent the '/' character from being typed
+            document.getElementById('symbolInput').focus(); // Focus on the search input
+        }
+    });
+</script>
+{% endblock %}

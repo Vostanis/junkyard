@@ -1,46 +1,42 @@
-mod rest_api;
-
 use actix_files as fs;
-use actix_web::{middleware::Logger, web, App, HttpServer};
-use deadpool_postgres::{Config, ManagerConfig, RecyclingMethod, Runtime};
-use dotenv::{dotenv, var};
-use tokio_postgres::NoTls;
+use actix_web::{get, App, HttpResponse, HttpServer, Responder};
+use log::info;
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
 
+mod rest_api;
+use rest_api::*;
+
+// create API documentation
+#[derive(OpenApi)]
+// #[openapi(paths(rest_api::stock_symbols))]
+struct ApiDoc;
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "actix_web=debug");
-    dotenv::dotenv().ok();
-    // env_logger::init();
+    // Initialize logger
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    // build pool from .env DATABASE_URL
-    let db_url = var("FINDUMP_URL").expect("FINDUMP_URL must be set");
-    let mut cfg = Config::new();
-    cfg.url = Some(db_url);
-    cfg.manager = Some(ManagerConfig {
-        recycling_method: RecyclingMethod::Fast,
-    });
-    let pool = cfg
-        .create_pool(Some(Runtime::Tokio1), NoTls)
-        .expect("Failed to create pool");
+    let bind_address = "127.0.0.1:8081";
+    info!("Starting server at http://{}", bind_address);
 
-    // create API documentation
-    #[derive(OpenApi)]
-    #[openapi(paths(rest_api::index))]
-    struct ApiDoc;
-    let openapi = ApiDoc::openapi();
-
-    // run server
-    HttpServer::new(move || {
+    HttpServer::new(|| {
         App::new()
-            .wrap(Logger::default())
-            .app_data(web::Data::new(pool.clone()))
-            .service(rest_api::index)
+            // API endpoints
+            .service(hello_api)
+            .service(health_check)
+            .service(stock::symbols)
+            .service(stock::prices)
+            .service(stock::metrics)
+            .service(stock::aggregates)
+            // Serve the REST API Documentation
             .service(Redoc::with_url("/redoc", ApiDoc::openapi()))
-            .service(fs::Files::new("/static", "./static").show_files_listing())
+            // Serve the WASM package files
+            .service(fs::Files::new("/pkg", "./static/pkg").show_files_listing())
+            // Serve static files and set index.html as the default
+            .service(fs::Files::new("/", "./static").index_file("index.html"))
     })
-    .bind(("127.0.0.1", 11234))?
+    .bind(bind_address)?
     .run()
     .await
 }
