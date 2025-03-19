@@ -1,40 +1,16 @@
 use actix_files as fs;
 use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use log::info;
-use serde::{Deserialize, Serialize};
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
 
 mod rest_api;
+use rest_api::*;
 
 // create API documentation
 #[derive(OpenApi)]
-#[openapi(paths(rest_api::stock_symbols))]
+// #[openapi(paths(rest_api::stock_symbols))]
 struct ApiDoc;
-
-// Simple API response structure
-#[derive(Serialize, Deserialize)]
-struct ApiResponse {
-    message: String,
-    status: String,
-}
-
-// API endpoint to test server-client communication
-#[get("/api/hello")]
-async fn hello_api() -> impl Responder {
-    let response = ApiResponse {
-        message: "Hello from Actix-Web API!".to_string(),
-        status: "success".to_string(),
-    };
-
-    HttpResponse::Ok().json(response)
-}
-
-// Health check endpoint
-#[get("/health")]
-async fn health_check() -> impl Responder {
-    HttpResponse::Ok().body("Server is running!")
-}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -49,7 +25,10 @@ async fn main() -> std::io::Result<()> {
             // API endpoints
             .service(hello_api)
             .service(health_check)
-            .service(rest_api::stock_symbols)
+            .service(stock::symbols)
+            .service(stock::prices)
+            .service(stock::metrics)
+            .service(stock::aggregates)
             // Serve the REST API Documentation
             .service(Redoc::with_url("/redoc", ApiDoc::openapi()))
             // Serve the WASM package files
