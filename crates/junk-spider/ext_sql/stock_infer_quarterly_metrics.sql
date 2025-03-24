@@ -33,7 +33,7 @@ WITH
 annual_cte AS (
 	SELECT DISTINCT
 		ROW_NUMBER() OVER () AS id_a,
-		symbol_pk,
+		symbol_pk, 
 		metric_pk,
 		taxonomy_pk, 
 		start_date,

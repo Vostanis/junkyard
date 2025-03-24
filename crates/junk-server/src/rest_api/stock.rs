@@ -72,14 +72,12 @@ pub async fn symbols(db_pool: web::Data<PgPool>) -> impl Responder {
         title,
         industry
     FROM stock.symbols";
-    
+
     let result = sqlx::query(query)
-        .map(|row: sqlx::postgres::PgRow| {
-            StockSymbols {
-                symbol: row.get("symbol"),
-                title: row.get("title"),
-                industry: row.get("industry"),
-            }
+        .map(|row: sqlx::postgres::PgRow| StockSymbols {
+            symbol: row.get("symbol"),
+            title: row.get("title"),
+            industry: row.get("industry"),
         })
         .fetch_all(db_pool.get_ref())
         .await;

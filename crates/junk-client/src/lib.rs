@@ -47,4 +47,3 @@ pub fn run_app() -> Result<(), JsValue> {
 
     Ok(())
 }
-

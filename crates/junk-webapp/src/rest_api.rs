@@ -99,11 +99,11 @@ async fn index(db_pool: web::Data<Pool>) -> impl Responder {
 //     responses(
 //         (
 //             status = 200, description = "Financial metrics of US stocks",
-//             body = [StockMetrics], content_type = "application/json", 
+//             body = [StockMetrics], content_type = "application/json",
 //             example = json!([
 //                 {
-//                     "date": "2021-01-01", 
-//                     "metric": "GrossProfit", 
+//                     "date": "2021-01-01",
+//                     "metric": "GrossProfit",
 //                     "value": 123456.00
 //                 }
 //             ])
@@ -182,12 +182,12 @@ async fn index(db_pool: web::Data<Pool>) -> impl Responder {
 //     path = "/stock/prices/{ticker}",
 //     responses(
 //         (
-//             status = 200, description = "Prices of US stocks", 
-//             body = [StockPrices], content_type = "application/json", 
+//             status = 200, description = "Prices of US stocks",
+//             body = [StockPrices], content_type = "application/json",
 //             example = json!([
 //                 {
 //                     "time": 1500000000,
-//                     "interval": "1d", 
+//                     "interval": "1d",
 //                     "open": 123456.00,
 //                     "high": 123457.00,
 //                     "low": 123455.00,

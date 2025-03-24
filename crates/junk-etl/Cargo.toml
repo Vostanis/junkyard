@@ -5,6 +5,17 @@ version.workspace = true
 readme.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+deadpool-postgres = "0.14.1"
+dotenv.workspace = true
+futures.workspace = true
 indicatif.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 sqlx.workspace = true
+thiserror = "2.0.12"
+tokio.workspace = true
+tokio-postgres = "0.7.13"
+tokio-stream = "0.1.17"
+tracing.workspace = true
