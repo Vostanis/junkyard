@@ -25,7 +25,7 @@ pub(super) trait PgLoad {
 pub(super) trait Broker<Symbols, Prices>
 where
     Symbols: for<'de> Deserialize<'de> + std::iter::Iterator + HttpGet + PgLoad,
-    Prices: for<'de> Deserialize<'de> + HttpGet + PgLoad,
+    Prices: for<'de> Deserialize<'de> + std::iter::Iterator + HttpGet + PgLoad,
 {
     /// Convenient way of retrieving Type Name for debugging, e.g.
     ///
@@ -80,10 +80,10 @@ where
     /// around.
     ///
     /// The list return data type requires an implementation of [serde::Deserialize].
-    async fn symbols(pg_client: &mut PgClient) -> Result<Symbols>;
+    async fn symbols(pool: &Pool) -> Result<Symbols>;
 
     /// Use the symbols to GET & Load the prices.
-    async fn prices(pg_client: &mut PgClient) -> Result<()>;
+    async fn prices(pool: &Pool) -> Result<()>;
 
     /// Each Broker can use slightly different interval terminology, e.g.
     ///
@@ -96,11 +96,11 @@ where
     }
 
     /// Default framework for the entire webscraping process.
-    async fn execute(pg_pool: &Pool) -> Result<()> {
+    async fn execute(pool: &Pool) -> Result<()> {
         // Fetch the initial Symbols list, and Load them to the database (without
         // deaallocating them).
         info!("Getting symbols for {} ...", Self::name());
-        let symbols = Self::symbols(pg_client).await?;
+        let symbols = Self::symbols(pool).await?;
 
         // We only need the 1 Source PK, so retrieve it; and if it fails then
         // we insert a new Primary Key and call it again.
@@ -112,40 +112,27 @@ where
         );
         let source_pk = {
             let source = Self::name();
-            match super::common::existing_sources(pg_client)
-                .await?
-                .get(source)
-            {
-                Ok(pk) => pk,
-                Err(e) => {
-                    debug! {"{source} does not found; inserting new record to postgres ..."};
-                    super::common::new_source(source).await?;
-                    pg_client
-                        .execute(
-                            r#"
-                            INSERT INTO crypto.ref_sources (source)
-                            VALUES ($1)
-                            ON CONFLICT DO NOTHING
-                            "#,
-                            &[&source],
-                        )
-                        .await;
-                }
-            }
+            super::common::existing_source(pool, source.to_string()).await?
         };
 
         // Fetch all the existing Symbol Primary Keys from the database.
         info!("Retrieving existing Primary Keys for symbols ...");
-        let symbol_pk_map = super::common::existing_symbols(pg_client).await?;
+        let symbol_pk_map = super::common::existing_symbols(pool).await?;
 
         // Using the Source PK, and having access to the existing_symbols map for `symbol_pk`s,
         // fetch each price dataset.
-        info!("Getting prices for {} ...", Self::name());
+        info!("Fetching prices for {} ...", Self::name());
+        let http_client = Self::http_client();
+        let (mut success, mut failure): (u16, u16) = (0, 0);
         let mut stream = stream::iter(symbols);
-        while let Some(symbol) = stream.next().await {}
+        while let Some(symbol) = stream.next().await {
+            let http_client = &http_client;
 
-        // Finito.
-        info!("Collected prices from {}." Self::name());
+            async move {}.await;
+        }
+
+        // Finish.
+        info!("Collected prices from {}.", Self::name());
 
         Ok(())
     }

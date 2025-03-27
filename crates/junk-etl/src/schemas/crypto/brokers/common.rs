@@ -1,6 +1,7 @@
-use anyhow::Result;
-use sqlx::{PgPool, Row};
+use anyhow::{anyhow, Result};
+use deadpool_postgres::Pool;
 use std::collections::HashMap;
+use tracing::{debug, error};
 
 /// Insert a row of price data.
 pub(super) const INSERT_PRICE: &str = r#"
@@ -30,15 +31,20 @@ DO NOTHING
 "#;
 
 /// Retrieve the already-existing Symbols from the database, with their respective Primary Keys.
-pub(crate) async fn existing_symbols(pool: &PgPool) -> Result<HashMap<String, i32>> {
-    let rows = sqlx::query(
-        r#"
+pub(crate) async fn existing_symbols(pool: &Pool) -> Result<HashMap<String, i32>> {
+    let client = pool.get().await.expect("Failed to get client from pool");
+
+    let stmt = client
+        .prepare(
+            r#"
         SELECT symbol, symbol_pk
         FROM crypto.ref_symbols
         "#,
-    )
-    .fetch_all(pool)
-    .await?;
+        )
+        .await?;
+
+    let rows = client.query(&stmt, &[]).await?;
+    drop(client); // drop the client as quickly as possible
 
     let map = rows
         .into_iter()
@@ -47,22 +53,30 @@ pub(crate) async fn existing_symbols(pool: &PgPool) -> Result<HashMap<String, i3
 
     Ok(map)
 }
-    
+
 /// Retrieve the already-existing Sources from the database, with their respective Primary Keys.
-pub(crate) async fn existing_sources(pool: &PgPool) -> Result<HashMap<String, i16>> {
-    let rows = sqlx::query(
-        r#"
-        SELECT source, source_pk
-        FROM crypto.ref_sources
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
+pub(crate) async fn existing_source(pool: &Pool, source: String) -> Result<i16> {
+    let client = pool.get().await.expect("Failed to get client from pool");
 
-    let map = rows
-        .into_iter()
-        .map(|row| (row.get("source"), row.get("source_pk")))
-        .collect::<HashMap<String, i16>>();
+    // Attempt to find the Source PK in the existing table.
+    let pk = match client.query_one("SELECT source_pk FROM crypto.ref_sources WHERE source = $1", &[&source]).await {
+        Ok(pk) => pk,
 
-    Ok(map)
+        // If no PK is found, insert a new one, and reattempt to find it.
+        Err(_e) => {
+            debug!("{source} was not found in crypto.ref_symbols; inserting new source ...");
+            client.query_one("INSERT INTO crypto.ref_symbols (source) VALUES ($1)", &[&source]).await?;
+            match client.query_one("SELECT source_pk FROM crypto.ref_sources WHERE source = $1", &[&source]).await {
+                Ok(new_pk) => new_pk,
+                Err(e) => {
+                    error!("{source} failed again - aborting: {e}");
+                    return Err(anyhow!(e));
+                }
+            }
+        }
+    };
+
+    drop(client);
+
+    Ok(pk.get("source_pk"))
 }
