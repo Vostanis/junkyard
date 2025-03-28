@@ -44,6 +44,8 @@ pub async fn scrape(pool: &Pool, tui: bool) -> anyhow::Result<()> {
     } else {
         ProgressBar::hidden()
     };
+
+    
     let http_client = build_client();
     let tickers: Tickers = http_client
         .get("https://api.binance.com/api/v1/ticker/allBookTickers")

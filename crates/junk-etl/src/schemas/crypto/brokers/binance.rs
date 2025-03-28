@@ -1,23 +1,65 @@
 // use crate::if_tui;
+// use super::broker::{Broker, HttpGet, PgLoad};
 use super::common;
 // use crate::util::num_concurrent_threads;
 
 use anyhow::{anyhow, Result};
+use deadpool_postgres::Pool;
 use dotenv::var;
 use futures::{stream, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Client as HttpClient, ClientBuilder};
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::Deserialize;
-use sqlx::PgPool;
 use tokio_postgres::Client as PgClient;
 use tracing::{debug, error, info, trace};
+
+pub struct Binance;
+
+// impl Broker<Tickers, Klines> for Binance {
+//     fn name() -> &'static str {
+//         "Binance"
+//     }
+//
+//     fn http_headers<'a>() -> Vec<(&'static str, String)> {
+//         vec![(
+//             "X-MBX-APIKEY",
+//             var("BINANCE_API").expect("Failed to find BINANCE_API environment variable"),
+//         )]
+//     }
+//
+//     async fn symbols(&self, pool: &Pool) -> Result<Tickers> {
+//         let client = Self::http_client()?;
+//         let tickers: Tickers = client
+//             .get("https://api.binance.com/api/v1/ticker/allBookTickers")
+//             .send()
+//             .await
+//             .map_err(|e| {
+//                 error!("Failed sending request for ticker symbols: {e}");
+//                 e
+//             })?
+//             .json()
+//             .await
+//             .map_err(|e| {
+//                 error!("Failed deserializing ticker symbols: {e}");
+//                 e
+//             })?;
+//
+//         Ok(tickers)
+//     }
+//
+//     async fn prices(&self, pool: &Pool) -> Result<()> {
+//         let client = Self::http_client()?;
+//
+//         Ok(())
+//     }
+// }
 
 /// Constant used in debugging messages.
 const DEBUG_API: &str = "Binance";
 
 /// Client for Binance requires the "X-MBX-APIKEY" header.
-pub(super) fn client() -> Result<Client> {
+pub(super) fn client() -> Result<HttpClient> {
     let env_var = "BINANCE_API";
     let api_key = var(env_var)?;
 
@@ -266,58 +308,58 @@ pub(crate) async fn get_symbols() -> Result<Tickers> {
     Ok(tickers)
 }
 
-/// Perform the entire webscraping process.
-///
-/// ## Information
-///
-/// 1. Binance has a RATE_LIMIT = 1200 per 60s.
-///
-/// 2. Endpoints:
-///     a) Tickers = "https://api.binance.com/api/v1/ticker/allBookTickers"
-///     b) Prices, per symbol = "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000"
-///
-/// ## Process
-///
-/// 1. Fetch & insert the all the Ticker Symbols.
-///
-/// 2. Fetch hashmaps of Primary Keys for 2 tables: Symbols & Sources.
-///    This is done so we can insert the Primary Key, instead of the String.
-///
-/// 3. Webscraping the prices (asynchronously).
-pub(crate) async fn webscrape(pool: &PgPool, tui: bool) -> Result<()> {
-    // 1. Fetch & insert all the Ticker Symbols.
-    if tui {
-        println!("fetching tickers from {DEBUG_API} ...");
-    }
-    debug!("Requesting ticker symbols");
-    let symbols = get_symbols().await?;
-    trace!("{} ticker symbols retrieved", symbols.0.len());
-
-    debug!("Inserting ticker symbols to database");
-    symbols.insert(pool).await?;
-
-    // 2. Fetch Hashmaps of Primary Keys for 2 tables: Symbols & Sources.
-    if tui {
-        println!("fetching existing Primary Keys ...");
-    }
-    debug!("Retrieving existing Symbol Primary Keys");
-    let symbol_pks = super::common::existing_symbols(pool).await?;
-    trace!(
-        "{} existing symbol primary keys retrieved",
-        symbol_pks.len()
-    );
-
-    debug!("Retrieving existing Source Primary Keys");
-    let source_pks = super::common::existing_sources(pool).await?;
-    trace!(
-        "{} existing source primary keys retrieved",
-        source_pks.len()
-    );
-
-    // 3. Async webscraping the prices.
-    if tui {
-        println!("webscraping prices from {DEBUG_API} ...");
-    }
-
-    Ok(())
-}
+// /// Perform the entire webscraping process.
+// ///
+// /// ## Information
+// ///
+// /// 1. Binance has a RATE_LIMIT = 1200 per 60s.
+// ///
+// /// 2. Endpoints:
+// ///     a) Tickers = "https://api.binance.com/api/v1/ticker/allBookTickers"
+// ///     b) Prices, per symbol = "https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1d&limit=1000"
+// ///
+// /// ## Process
+// ///
+// /// 1. Fetch & insert the all the Ticker Symbols.
+// ///
+// /// 2. Fetch hashmaps of Primary Keys for 2 tables: Symbols & Sources.
+// ///    This is done so we can insert the Primary Key, instead of the String.
+// ///
+// /// 3. Webscraping the prices (asynchronously).
+// pub(crate) async fn webscrape(pool: &PgPool, tui: bool) -> Result<()> {
+//     // 1. Fetch & insert all the Ticker Symbols.
+//     if tui {
+//         println!("fetching tickers from {DEBUG_API} ...");
+//     }
+//     debug!("Requesting ticker symbols");
+//     let symbols = get_symbols().await?;
+//     trace!("{} ticker symbols retrieved", symbols.0.len());
+//
+//     debug!("Inserting ticker symbols to database");
+//     symbols.insert(pool).await?;
+//
+//     // 2. Fetch Hashmaps of Primary Keys for 2 tables: Symbols & Sources.
+//     if tui {
+//         println!("fetching existing Primary Keys ...");
+//     }
+//     debug!("Retrieving existing Symbol Primary Keys");
+//     let symbol_pks = super::common::existing_symbols(pool).await?;
+//     trace!(
+//         "{} existing symbol primary keys retrieved",
+//         symbol_pks.len()
+//     );
+//
+//     debug!("Retrieving existing Source Primary Keys");
+//     let source_pks = super::common::existing_sources(pool).await?;
+//     trace!(
+//         "{} existing source primary keys retrieved",
+//         source_pks.len()
+//     );
+//
+//     // 3. Async webscraping the prices.
+//     if tui {
+//         println!("webscraping prices from {DEBUG_API} ...");
+//     }
+//
+//     Ok(())
+// }
