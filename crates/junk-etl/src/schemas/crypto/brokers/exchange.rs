@@ -3,14 +3,12 @@ use deadpool_postgres::Pool;
 use futures::{stream, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Client as HttpClient, ClientBuilder};
-use serde::Deserialize;
 use std::collections::HashMap;
-use tokio_postgres::Client as PgClient;
 use tracing::{debug, error, info};
 
 /// Represents exchange-specific data types that can be fetched from HTTP
 /// and loaded into the database.
-pub trait ExchangeData: for<'de> Deserialize<'de> {
+pub trait ExchangeData: for<'de> serde::Deserialize<'de> + std::iter::IntoIterator + futures::Stream + Unpin {
     /// The API endpoint to fetch this data
     fn url(&self, symbol: Option<&str>, interval: Option<&str>) -> String;
 
@@ -18,19 +16,26 @@ pub trait ExchangeData: for<'de> Deserialize<'de> {
     async fn pg_load(
         &self,
         pool: &Pool,
-        metadata: Option<&ExchangeMetadata>,
+        metadata: Option<impl Metadata>,
     ) -> Result<()>;
 }
 
+/// Mark what is considered as metadata within a process; for example,
+/// if a loading process requires Primary Keys, those PKs would be
+/// metadata.
+pub trait Metadata {}
+
 /// Metadata needed for database operations.
+///
+/// Primary Keys (PKs) are retrieved from the database first, in order
+/// to improve fetching speeds.
 pub struct ExchangeMetadata {
     pub source_pk: i16,
     pub symbol_pks: HashMap<String, i32>,
-    pub interval_pks: HashMap<String, i16>,
 }
 
 /// Core trait for crypto exchange brokers.
-pub trait Broker {
+pub trait Exchange {
     /// Name of the exchange.
     fn name() -> &'static str;
 
@@ -79,7 +84,6 @@ pub trait Broker {
 
     /// Generalised framework for the full API-webscraping process.
     async fn execute(&self, pool: &Pool) -> Result<()> {
-        // Execute the entire data collection process.
         info!("Starting data collection for {}", Self::name());
 
         // Build HTTP client.
@@ -94,23 +98,22 @@ pub trait Broker {
         info!("Loading symbols into database");
         let source_pk = super::common::existing_source(pool, Self::name().to_string()).await?;
         let symbol_pks = super::common::existing_symbols(pool).await?;
-        let interval_pks = super::common::existing_intervals(pool).await?;
         let metadata = ExchangeMetadata {
             source_pk,
             symbol_pks,
-            interval_pks,
         };
 
         // Process each symbol and interval combination.
-        info!("Fetching price data for {} symbols", symbols.len());
+        info!("Fetching price data for {} symbols", Self::name());
         let mut success_count = 0;
         let mut error_count = 0;
 
         let intervals = Self::intervals();
+        let mut stream = stream::iter(symbols);
         for interval in intervals {
-            let mut stream = stream::iter(symbols);
-            while let Some(symbol) = symbols.next().await {
-                let = http_client = &http_client;
+        let interval_pks = super::common::existing_intervals(pool, interval.to_string()).await?;
+            while let Some(symbol) = stream.next().await {
+                let http_client = &http_client;
 
                 async move {}.await;
             }
@@ -126,6 +129,3 @@ pub trait Broker {
         Ok(())
     }
 }
-
-// Implementations for specific brokers would derive from this trait
-

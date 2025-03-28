@@ -54,7 +54,9 @@ pub(crate) async fn existing_symbols(pool: &Pool) -> Result<HashMap<String, i32>
     Ok(map)
 }
 
-/// Retrieve the already-existing Sources from the database, with their respective Primary Keys.
+/// Retrieve the already-existing Source from the database.
+///
+/// On failues, attempt to insert a new source, and retrieve the PK.
 pub(crate) async fn existing_source(pool: &Pool, source: String) -> Result<i16> {
     let client = pool.get().await.expect("Failed to get client from pool");
 
@@ -98,29 +100,33 @@ pub(crate) async fn existing_source(pool: &Pool, source: String) -> Result<i16> 
     Ok(pk.get("source_pk"))
 }
 
+/// Retrieve the already-existing Interal PK from the database.
+///
+/// On failues, attempt to insert a new source, and retrieve the PK.
 pub(crate) async fn existing_intervals(
     pool: &Pool,
     interval: String,
-) -> Result<HashMap<String, i16>> {
+) -> Result<i16> {
     let client = pool.get().await.expect("Failed to get client from pool");
 
     // Attempt to find the Source PK in the existing table.
     let pk = match client
         .query_one(
-            "SELECT interval_pk FROM common_ref_intervals WHERE interval = $1",
+            "SELECT interval_pk FROM common.ref_time_intervals WHERE interval = $1",
             &[&interval],
         )
         .await
     {
         Ok(pk) => pk,
 
-        // If no PK is found, insert a new one, and reattempt to find it.
+        // If no PK is found, insert a new one, and reattempt to find it
+        // (assuming the error stems from no source being found).
         Err(_e) => {
             debug!("{interval} was not found in common.ref_intervals; inserting new source ...");
             client
                 .query_one(
                     "INSERT INTO common.ref_intervals (interval) VALUES ($1)",
-                    &[&intervak],
+                    &[&interval],
                 )
                 .await?;
             match client
